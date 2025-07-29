@@ -1,10 +1,12 @@
 import axios from 'axios';
-import { API_BASE_URL } from '@env';
+import { API_BASE_URL, API_KEY } from '@env';
 
 const api = axios.create({
   baseURL: `${API_BASE_URL}/auth`,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
 });
+
+console.log(JSON.stringify(api))
 
 export async function registerUser(data) {
   const res = await api.post('/register', data);
@@ -20,6 +22,7 @@ export async function fetchUserProfile(token) {
   const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: {
       Authorization: `Bearer ${token}`,
+      'x-api-key': API_KEY,
     },
   });
 

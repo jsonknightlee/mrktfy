@@ -1,11 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
-
-import { getToken, deleteToken } from '../utils/tokenStorage';
-import { fetchUserProfile } from '../services/authApi';
 
 import MapScreen from '../screens/MapScreen';
 import ARScreen from '../screens/ARScreen';
@@ -13,67 +10,25 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 
+import  {AuthContext}  from '../contexts/AuthContext';
+
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
 function MainTabs() {
   return (
     <Tab.Navigator screenOptions={{ headerShown: false }}>
-      <Tab.Screen
-        name="Map"
-        component={MapScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="AR"
-        component={ARScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="camera" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle" size={size} color={color} />
-          ),
-        }}
-      />
+      <Tab.Screen name="Map" component={MapScreen} options={{ tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} /> }} />
+      <Tab.Screen name="AR" component={ARScreen} options={{ tabBarIcon: ({ color, size }) => <Ionicons name="camera" size={size} color={color} /> }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={color} /> }} />
     </Tab.Navigator>
   );
 }
 
 export default function AppNavigator() {
-  const [isLoggedIn, setIsLoggedIn] = useState(null); // null = checking
+  const { isLoggedIn } = useContext(AuthContext);
 
-  useEffect(() => {
-    const checkLogin = async () => {
-      const token = await getToken();
-      if (token) {
-        try {
-          await fetchUserProfile(token);
-          setIsLoggedIn(true);
-        } catch (err) {
-          console.log('Token invalid or expired');
-          await deleteToken();
-          setIsLoggedIn(false);
-        }
-      } else {
-        setIsLoggedIn(false);
-      }
-    };
-
-    checkLogin();
-  }, []);
-
-  if (isLoggedIn === null) return null; // or splash/loading
+  if (isLoggedIn === null) return null; // loading screen optionally
 
   return (
     <NavigationContainer>

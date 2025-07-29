@@ -45,7 +45,7 @@ export default function MapScreen() {
       <MapView
         style={styles.map}
         showsUserLocation
-        region={{
+        initialRegion={{
           latitude: userLocation.latitude,
           longitude: userLocation.longitude,
           latitudeDelta: 0.05,
@@ -71,7 +71,7 @@ export default function MapScreen() {
       {selectedListing && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{selectedListing.Title}</Text>
-          <Text>Type: {selectedListing.Type}</Text>
+          <Text>Price: {selectedListing.Price}</Text>
           <TouchableOpacity onPress={() => setSelectedListing(null)}>
             <Text style={styles.close}>Close</Text>
           </TouchableOpacity>
