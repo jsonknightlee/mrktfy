@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { fetchListingsNearby } from '../services/realEstateApi';
+import { fetchNearbyListings } from '../services/realEstateApi';
 
 export default function MapScreen() {
   const [userLocation, setUserLocation] = useState(null);
@@ -10,7 +10,7 @@ export default function MapScreen() {
   const [selectedListing, setSelectedListing] = useState(null);
 
   useEffect(() => {
-    const init = async () => {
+    const fetchInitialLocationAndListings = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         console.warn('Permission to access location was denied');
@@ -21,11 +21,15 @@ export default function MapScreen() {
       const { latitude, longitude } = location.coords;
       setUserLocation({ latitude, longitude });
 
-      const nearbyListings = await fetchListingsNearby(latitude, longitude);
-      setListings(nearbyListings);
+      try {
+        const nearbyListings = await fetchNearbyListings(latitude, longitude);
+        setListings(nearbyListings);
+      } catch (err) {
+        console.error('Failed to fetch listings:', err);
+      }
     };
 
-    init();
+    fetchInitialLocationAndListings();
   }, []);
 
   if (!userLocation) {
@@ -41,22 +45,24 @@ export default function MapScreen() {
       <MapView
         style={styles.map}
         showsUserLocation
-        initialRegion={{
+        region={{
           latitude: userLocation.latitude,
           longitude: userLocation.longitude,
           latitudeDelta: 0.05,
           longitudeDelta: 0.05,
         }}
+        // Don't listen to region changes for now
+        onRegionChangeComplete={() => {}}
       >
         {listings.map((listing) => (
           <Marker
-            key={listing.id}
+            key={listing.ID}
             coordinate={{
-              latitude: listing.latitude,
-              longitude: listing.longitude,
+              latitude: listing.Latitude,
+              longitude: listing.Longitude,
             }}
-            title={listing.title}
-            pinColor={listing.type === 'sale' ? 'green' : 'blue'}
+            title={listing.Title}
+            pinColor="red"
             onPress={() => setSelectedListing(listing)}
           />
         ))}
@@ -64,8 +70,8 @@ export default function MapScreen() {
 
       {selectedListing && (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>{selectedListing.title}</Text>
-          <Text>Type: {selectedListing.type}</Text>
+          <Text style={styles.cardTitle}>{selectedListing.Title}</Text>
+          <Text>Type: {selectedListing.Type}</Text>
           <TouchableOpacity onPress={() => setSelectedListing(null)}>
             <Text style={styles.close}>Close</Text>
           </TouchableOpacity>

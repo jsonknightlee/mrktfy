@@ -1,6 +1,8 @@
 import { API_BASE_URL } from '@env';// Replace with your local or deployed API
 import {API_KEY} from '@env';
 
+
+console.log(API_KEY)
 export async function fetchNearbyListings(lat, lng, radiusKm = 5) {
   const url = `${API_BASE_URL}/realestate/nearby?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`;
   console.log('Calling:', url);

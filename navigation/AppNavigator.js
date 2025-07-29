@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
+import { Ionicons } from '@expo/vector-icons';
+
+import { getToken, deleteToken } from '../utils/tokenStorage';
+import { fetchUserProfile } from '../services/authApi';
 
 import MapScreen from '../screens/MapScreen';
 import ARScreen from '../screens/ARScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 
@@ -13,22 +18,69 @@ const Stack = createStackNavigator();
 
 function MainTabs() {
   return (
-    <Tab.Navigator>
-      <Tab.Screen name="Map" component={MapScreen} />
-      <Tab.Screen name="AR" component={ARScreen} />
+    <Tab.Navigator screenOptions={{ headerShown: false }}>
+      <Tab.Screen
+        name="Map"
+        component={MapScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="AR"
+        component={ARScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="camera" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle" size={size} color={color} />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 }
 
 export default function AppNavigator() {
-  const [isLoggedIn, setIsLoggedIn] = useState(true); // 🔐 change to false to test auth flow
+  const [isLoggedIn, setIsLoggedIn] = useState(null); // null = checking
+
+  useEffect(() => {
+    const checkLogin = async () => {
+      const token = await getToken();
+      if (token) {
+        try {
+          await fetchUserProfile(token);
+          setIsLoggedIn(true);
+        } catch (err) {
+          console.log('Token invalid or expired');
+          await deleteToken();
+          setIsLoggedIn(false);
+        }
+      } else {
+        setIsLoggedIn(false);
+      }
+    };
+
+    checkLogin();
+  }, []);
+
+  if (isLoggedIn === null) return null; // or splash/loading
 
   return (
     <NavigationContainer>
       {isLoggedIn ? (
         <MainTabs />
       ) : (
-        <Stack.Navigator>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
         </Stack.Navigator>
