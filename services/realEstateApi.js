@@ -1,17 +1,21 @@
-import { API_BASE_URL } from '@env';// Replace with your local or deployed API
-import {API_KEY} from '@env';
+import { API_BASE_URL } from '@env'; // Replace with your local or deployed API
+import { API_KEY } from '@env';
 
+console.log(API_KEY);
 
-console.log(API_KEY)
-export async function fetchNearbyListings(lat, lng, radiusKm = 5) {
-  const url = `${API_BASE_URL}/realestate/nearby?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`;
+// Now supports an optional 4th param: `type` = 'rental' | 'sale'
+export async function fetchNearbyListings(lat, lng, radiusKm = 5, type /* optional */) {
+  let url = `${API_BASE_URL}/realestate/nearby?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`;
+  if (type) {
+    url += `&type=${encodeURIComponent(type)}`;
+  }
   console.log('Calling:', url);
 
   try {
     const res = await fetch(url, {
       headers: {
         'x-api-key': API_KEY,
-        'Accept': 'application/json',
+        Accept: 'application/json',
       },
     });
 
@@ -22,8 +26,32 @@ export async function fetchNearbyListings(lat, lng, radiusKm = 5) {
       throw new Error(`Unexpected server response (${res.status})`);
     }
 
-    const data = await res.json();
-    console.log('Nearby listings response:', data);
+    let data = await res.json();
+
+    // 🔥 Clean the ImageUrls field for each listing
+    data = data.map((listing) => {
+      let imageUrls = [];
+
+      if (typeof listing.ImageUrls === 'string') {
+        try {
+          const parsed = JSON.parse(listing.ImageUrls);
+          if (Array.isArray(parsed)) {
+            // Remove :p suffix, keep only 1024/768, and dedupe
+            const seen = new Set();
+            imageUrls = parsed
+              .map((url) => url.replace(':p', ''))
+              .filter((url) => url.includes('1024/768') && !seen.has(url) && seen.add(url));
+          }
+        } catch (e) {
+          console.warn('Could not parse ImageUrls for listing ID:', listing.ID, listing.ImageUrls);
+        }
+      }
+
+      return { ...listing, ImageUrls: imageUrls };
+    });
+
+    console.log('Listings: ' + JSON.stringify(data))
+
     return data;
   } catch (err) {
     console.error('fetchNearbyListings ERROR:', err.message);

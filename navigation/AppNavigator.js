@@ -9,8 +9,9 @@ import ARScreen from '../screens/ARScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
+import ListingDetailScreen from '../screens/ListingDetailScreen';
 
-import  {AuthContext}  from '../contexts/AuthContext';
+import { AuthContext } from '../contexts/AuthContext';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -18,9 +19,21 @@ const Stack = createStackNavigator();
 function MainTabs() {
   return (
     <Tab.Navigator screenOptions={{ headerShown: false }}>
-      <Tab.Screen name="Map" component={MapScreen} options={{ tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} /> }} />
-      <Tab.Screen name="AR" component={ARScreen} options={{ tabBarIcon: ({ color, size }) => <Ionicons name="camera" size={size} color={color} /> }} />
-      <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={color} /> }} />
+      <Tab.Screen
+        name="Map"
+        component={MapScreen}
+        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="AR"
+        component={ARScreen}
+        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="camera" size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={color} /> }}
+      />
     </Tab.Navigator>
   );
 }
@@ -28,18 +41,31 @@ function MainTabs() {
 export default function AppNavigator() {
   const { isLoggedIn } = useContext(AuthContext);
 
-  if (isLoggedIn === null) return null; // loading screen optionally
+  if (isLoggedIn === null) return null;
 
   return (
     <NavigationContainer>
-      {isLoggedIn ? (
-        <MainTabs />
-      ) : (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-        </Stack.Navigator>
-      )}
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {isLoggedIn ? (
+          <>
+            <Stack.Screen name="Tabs" component={MainTabs} />
+            <Stack.Screen
+              name="ListingDetail"
+              component={ListingDetailScreen}
+              options={{
+                presentation: 'modal',
+                headerShown: false,
+                gestureEnabled: true,
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </>
+        )}
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }

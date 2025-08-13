@@ -36,3 +36,7 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+screens/MapScreenBackup.js
+screens/MapScreenOld.js
+screens/ListingDetailScreenOld.js

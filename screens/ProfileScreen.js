@@ -2,11 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { getToken, deleteToken } from '../utils/tokenStorage';
 import { fetchUserProfile } from '../services/authApi';
-import { useNavigation } from '@react-navigation/native';
+
 
 export default function ProfileScreen() {
   const [user, setUser] = useState(null);
-  const navigation = useNavigation();
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -30,7 +29,7 @@ export default function ProfileScreen() {
             style={styles.logoutButton}
             onPress={async () => {
               await deleteToken();
-              navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+              setIsLoggedIn(false)
             }}
           >
             <Text style={styles.logoutText}>Logout</Text>
