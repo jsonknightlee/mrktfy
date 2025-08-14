@@ -1,8 +1,10 @@
+// ARScreen.js
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Image, TouchableOpacity } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Magnetometer } from 'expo-sensors';
+import { useNavigation } from '@react-navigation/native';
 import { getBearing, getDistance } from '../utils/geoUtils';
 import { fetchNearbyListings } from '../services/realEstateApi';
 
@@ -10,6 +12,7 @@ const REFRESH_DISTANCE_METERS = 50;
 const REFRESH_INTERVAL_MS = 30000;
 
 export default function ARScreen() {
+  const navigation = useNavigation();
   const [permission, requestPermission] = useCameraPermissions();
   const [location, setLocation] = useState(null);
   const [heading, setHeading] = useState(null);
@@ -17,6 +20,28 @@ export default function ARScreen() {
   const [loading, setLoading] = useState(true);
   const lastFetchTimeRef = useRef(0);
   const lastLocationRef = useRef(null);
+
+  // --- helpers ---
+  const normalizeForDetail = (l) => {
+    // Convert the AR listing (lowercase keys) into the shape your Detail screen expects
+    return {
+      ID: l.id ?? l.ID,
+      Title: l.title ?? l.Title ?? 'Listing',
+      Price: l.price ?? l.Price ?? (l.rent ? `£${l.rent}` : l.listPrice ? `£${l.listPrice}` : '£—'),
+      Latitude: l.latitude ?? l.Latitude,
+      Longitude: l.longitude ?? l.Longitude,
+      ListingType: (l.listingType ?? l.ListingType ?? '').toString().toLowerCase(),
+      ImageUrls: Array.isArray(l.imageUrls)
+        ? l.imageUrls
+        : l.imageUrl
+        ? [l.imageUrl]
+        : Array.isArray(l.ImageUrls)
+        ? l.ImageUrls
+        : [],
+      Beds: l.beds ?? l.Beds,
+      Baths: l.baths ?? l.Baths,
+    };
+  };
 
   // Get user location and auto-refresh listings
   useEffect(() => {
@@ -30,11 +55,15 @@ export default function ARScreen() {
       await fetchAndSetListings(loc.coords);
     })();
 
-    const watchId = Location.watchPositionAsync(
+    const watchPromise = Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 20 },
       async (locUpdate) => {
         const now = Date.now();
         const last = lastLocationRef.current;
+        if (!last) {
+          lastLocationRef.current = locUpdate.coords;
+          return;
+        }
         const distance = getDistance(
           last.latitude,
           last.longitude,
@@ -53,16 +82,19 @@ export default function ARScreen() {
     );
 
     return () => {
-      watchId.then((sub) => sub.remove());
+      watchPromise.then((sub) => sub.remove());
     };
   }, []);
 
   const fetchAndSetListings = async (coords) => {
-    setLoading(true);
-    const nearby = await fetchNearbyListings(coords.latitude, coords.longitude);
-    setListings(nearby);
-    lastFetchTimeRef.current = Date.now();
-    setLoading(false);
+    try {
+      setLoading(true);
+      const nearby = await fetchNearbyListings(coords.latitude, coords.longitude);
+      setListings(nearby);
+      lastFetchTimeRef.current = Date.now();
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Get heading from magnetometer
@@ -96,12 +128,18 @@ export default function ARScreen() {
 
   const visibleListings = listings
     .map((listing) => {
-      const bearing = getBearing(location.latitude, location.longitude, listing.latitude, listing.longitude);
+      const lat = listing.latitude ?? listing.Latitude;
+      const lon = listing.longitude ?? listing.Longitude;
+      if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+
+      const bearing = getBearing(location.latitude, location.longitude, lat, lon);
       const diff = Math.abs(bearing - heading);
-      const withinView = diff < 30 || diff > 330;
-      const distance = getDistance(location.latitude, location.longitude, listing.latitude, listing.longitude);
+      const withinView = diff < 30 || diff > 330; // ~60° horizontal FOV window
+      const distance = getDistance(location.latitude, location.longitude, lat, lon);
+
       return { ...listing, distance, bearing, visible: withinView };
     })
+    .filter(Boolean)
     .filter((item) => item.visible);
 
   return (
@@ -115,16 +153,21 @@ export default function ARScreen() {
 
         {!loading &&
           visibleListings.map((item, idx) => (
-            <View
-              key={item.id}
+            <TouchableOpacity
+              key={item.id ?? item.ID ?? String(idx)}
+              activeOpacity={0.9}
               style={[
                 styles.tokenBubble,
                 { top: 100 + idx * 120, left: 50 + (idx % 2) * 120 },
               ]}
+              onPress={() => navigation.navigate('ListingDetail', { listing: normalizeForDetail(item) })}
             >
-              <Text style={styles.tokenTitle}>{item.title || 'Listing'}</Text>
-              {item.imageUrl && (
-                <Image source={{ uri: item.imageUrl }} style={styles.image} />
+              <Text style={styles.tokenTitle}>{item.title ?? item.Title ?? 'Listing'}</Text>
+              {(item.imageUrl || (Array.isArray(item.imageUrls) && item.imageUrls[0])) && (
+                <Image
+                  source={{ uri: item.imageUrl || item.imageUrls[0] }}
+                  style={styles.image}
+                />
               )}
               {item.squareFootage && (
                 <Text style={styles.details}>{item.squareFootage} sq ft</Text>
@@ -132,7 +175,7 @@ export default function ARScreen() {
               <Text style={styles.details}>
                 {item.distance.toFixed(0)}m • {item.bearing.toFixed(0)}°
               </Text>
-            </View>
+            </TouchableOpacity>
           ))}
       </CameraView>
     </View>
