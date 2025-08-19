@@ -1,3 +1,4 @@
+// navigation/AppNavigator.js
 import React, { useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -41,10 +42,11 @@ function MainTabs() {
 export default function AppNavigator() {
   const { isLoggedIn } = useContext(AuthContext);
 
-  if (isLoggedIn === null) return null;
+  if (isLoggedIn === null) return null; // or a splash/loader
 
   return (
-    <NavigationContainer>
+    // 🔑 This key forces a full remount when auth flips
+    <NavigationContainer key={isLoggedIn ? 'app' : 'auth'}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isLoggedIn ? (
           <>
