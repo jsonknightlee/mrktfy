@@ -1,12 +1,12 @@
 import axios from 'axios';
-import { API_BASE_URL, API_KEY } from '@env';
+import Constants from "expo-constants";
+const { API_BASE_URL, API_KEY } = Constants.expoConfig.extra;
 
 const api = axios.create({
   baseURL: `${API_BASE_URL}/auth`,
   headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
 });
 
-console.log(JSON.stringify(api))
 
 export async function registerUser(data) {
   const res = await api.post('/register', data);

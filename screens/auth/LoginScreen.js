@@ -110,7 +110,7 @@ export default function LoginScreen({ navigation }) {
         placeholderTextColor="#999"
       />
 
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
+      <TouchableOpacity style={styles.button} onPress={() => handleLogin()}>
         <Text style={styles.buttonText}>Log In</Text>
       </TouchableOpacity>
 

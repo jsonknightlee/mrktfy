@@ -12,9 +12,11 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchNearbyListings } from '../services/realEstateApi';
 import { getToken } from '../utils/tokenStorage';
-import { API_BASE_URL, API_KEY } from '@env';
+import Constants from "expo-constants";
 import { useFavorites } from '../contexts/FavoritesContext';
 
+
+const { API_BASE_URL, API_KEY} = Constants.expoConfig.extra;
 const FILTER_STORAGE_KEY = 'mrktfy-filters';
 const TYPE_STORAGE_KEY = 'mrktfy-property-type';
 const TOAST_DURATION_MS = 20000; // 20s
