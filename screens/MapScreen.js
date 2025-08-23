@@ -14,7 +14,18 @@ import { fetchNearbyListings } from '../services/realEstateApi';
 import { getToken } from '../utils/tokenStorage';
 import Constants from "expo-constants";
 import { useFavorites } from '../contexts/FavoritesContext';
+import { api } from '../services/api';
 
+// Show only if the date is before today (local device timezone)
+const isBeforeToday = (iso) => {
+  if (!iso) return false;
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return d < startOfToday;
+};
+
+const formatLastViewed = (iso) => new Date(iso).toLocaleDateString();
 
 const { API_BASE_URL, API_KEY} = Constants.expoConfig.extra;
 const FILTER_STORAGE_KEY = 'mrktfy-filters';
@@ -65,9 +76,9 @@ export default function MapScreen() {
 
   //Open box on pin click fix
   const suppressMapPressUntilRef = React.useRef(0);
-const suppressMapPress = (ms = 450) => {
-  suppressMapPressUntilRef.current = Date.now() + ms;
-};
+  const suppressMapPress = (ms = 450) => {
+    suppressMapPressUntilRef.current = Date.now() + ms;
+  };
 
   const showToast = (msg, duration = TOAST_DURATION_MS) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -182,22 +193,6 @@ const suppressMapPress = (ms = 450) => {
     }
   }, [filterModalVisible, priceOptions, filters.minPrice, filters.maxPrice]);
 
-  // recent viewed
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = await getToken();
-        const res = await fetch(`${API_BASE_URL}/user-listings/recent`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        setLastViewed(data);
-      } catch (err) {
-        console.error('Failed to fetch recently viewed:', err);
-      }
-    })();
-  }, []);
-
   // fetch listings by type
   useEffect(() => {
     (async () => {
@@ -293,7 +288,7 @@ const suppressMapPress = (ms = 450) => {
     <View style={styles.container}>
       {/* Toast */}
       {toastVisible && (
-        <Animated.View style={[styles.toastWrap, { transform: [{ translateY: toastY }] }]}>
+        <Animated.View style={[styles.toastWrap, { transform: [{ translateY: toastY }] }]} >
           <TouchableWithoutFeedback onPress={hideToast}>
             <View style={styles.toast}>
               <Ionicons name="alert-circle" size={18} color="#fff" style={{ marginRight: 8 }} />
@@ -321,12 +316,10 @@ const suppressMapPress = (ms = 450) => {
             longitudeDelta: 0.05,
           }}
           onPress={() => {
-            //if (isInteractingWithMarker.current || isDismissingRef.current) return;
             if (Date.now() < suppressMapPressUntilRef.current) return;
             setSelectedListing(null);
           }}
           onPanDrag={() => {
-            //if (isInteractingWithMarker.current || isDismissingRef.current) return;
             if (Date.now() < suppressMapPressUntilRef.current) return;
             setSelectedListing(null);
           }}
@@ -358,18 +351,8 @@ const suppressMapPress = (ms = 450) => {
                 setTimeout(() => {
                   setSelectedListing(listing);
 
-                  fetch(`${API_BASE_URL}/user-listings/status?listingId=${listing.ID}`, {
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${token}`,
-                      'x-api-key': `${API_KEY}`,
-                    },
-                  })
-                    .then((res) => {
-                      if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
-                      return res.json();
-                    })
-                    .then((data) => {
+                  api.get(`/activity/user-listings/status`, { params: { listingId: listing.ID } })
+                    .then(({ data }) => {
                       if (data?.lastViewedAt) setLastViewed(listing.ID, data.lastViewedAt);
                     })
                     .catch((err) => console.error('Status fetch err:', err));
@@ -423,9 +406,11 @@ const suppressMapPress = (ms = 450) => {
               <Image key={idx} source={{ uri: imgUrl }} style={styles.image} />
             ))}
           </ScrollView>
+
           <TouchableOpacity onPress={() => navigation.navigate('ListingDetail', { listing: selectedListing })} activeOpacity={0.8}>
             <Text style={styles.cardTitle}>{selectedListing.Title}</Text>
 
+            {/* Price + Heart */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
               <Text style={{ fontSize: 16, fontWeight: '600' }}>Price: {selectedListing.Price}</Text>
               <TouchableOpacity onPress={() => toggleFavorite(selectedListing.ID)}>
@@ -435,12 +420,17 @@ const suppressMapPress = (ms = 450) => {
                   color={getFavoriteStatus(selectedListing.ID)?.isFavorited ? 'red' : 'gray'}
                 />
               </TouchableOpacity>
-              {getFavoriteStatus(selectedListing.ID)?.lastViewedAt && (
-                <Text style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                  Last viewed: {new Date(getFavoriteStatus(selectedListing.ID).lastViewedAt).toLocaleDateString()}
-                </Text>
-              )}
             </View>
+
+            {/* Conditionally show Last viewed only if it's from a previous day */}
+            {(() => {
+              const lv = getFavoriteStatus(selectedListing.ID)?.lastViewedAt;
+              return lv && isBeforeToday(lv) ? (
+                <Text style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                  Last viewed: {formatLastViewed(lv)}
+                </Text>
+              ) : null;
+            })()}
           </TouchableOpacity>
         </Animated.View>
       )}

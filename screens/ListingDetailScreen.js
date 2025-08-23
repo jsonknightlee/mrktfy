@@ -26,12 +26,12 @@ export default function ListingDetailScreen({ route, navigation }) {
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
-  const { isFavorited } = getFavoriteStatus(listing.ID) || {};
+  const isFavorited = getFavoriteStatus(listing.ID)?.isFavorited ?? !!route.params.listing?.isFavorited;
   const favoriteStatus = getFavoriteStatus(listing.ID);
   const lastViewedAt = favoriteStatus?.lastViewedAt;
 
 
-
+console.log('Fav: '+ JSON.stringify(listing))
   
 
 useEffect(() => {

@@ -49,7 +49,7 @@ export async function fetchNearbyListings(lat, lng, radiusKm = 5, type /* option
       return { ...listing, ImageUrls: imageUrls };
     });
 
-    console.log('Listings: ' + JSON.stringify(data))
+    //console.log('Listings: ' + JSON.stringify(data))
 
     return data;
   } catch (err) {
