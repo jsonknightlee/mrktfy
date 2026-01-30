@@ -29,6 +29,8 @@ export default () => ({
     }
   },
   android: {
+    package: "com.mrktfy.mrktfy",
+    versionCode: 18,
     adaptiveIcon: {
       foregroundImage: "./assets/mrktfy-icon.png",
       backgroundColor: "#ffffff"
