@@ -2,7 +2,8 @@
 import React, { useContext } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+
 import { Ionicons } from '@expo/vector-icons';
 
 import MapScreen from '../screens/MapScreen';
@@ -15,7 +16,8 @@ import ListingDetailScreen from '../screens/ListingDetailScreen';
 import { AuthContext } from '../contexts/AuthContext';
 
 const Tab = createBottomTabNavigator();
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
+
 
 function MainTabs() {
   return (
@@ -58,6 +60,7 @@ export default function AppNavigator() {
                 presentation: 'modal',
                 headerShown: false,
                 gestureEnabled: true,
+                animation: 'slide_from_bottom', // ✅ optional but nice
               }}
             />
           </>

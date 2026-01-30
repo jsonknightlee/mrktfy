@@ -18,6 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFavorites } from '../contexts/FavoritesContext';
 
 const { width } = Dimensions.get('window');
+const MODAL_HEIGHT = Dimensions.get("window").height * 0.9;
+
 
 export default function ListingDetailScreen({ route, navigation }) {
   const { listing } = route.params;
@@ -32,6 +34,34 @@ export default function ListingDetailScreen({ route, navigation }) {
 
 
 console.log('Fav: '+ JSON.stringify(listing))
+
+const normalizeImageUrls = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+
+  if (typeof val === "string") {
+    const s = val.trim();
+    if (!s) return [];
+
+    // JSON array string
+    if (s.startsWith("[") && s.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(s);
+        return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+      } catch {
+        // fall through
+      }
+    }
+
+    // delimited or single URL
+    return s.split(/[,|;]+/).map(x => x.trim()).filter(Boolean);
+  }
+
+  return [];
+};
+
+const imageUrls = normalizeImageUrls(listing.ImageUrls ?? listing.imageUrls ?? listing.imageUrl);
+
   
 
 useEffect(() => {
@@ -49,78 +79,87 @@ useEffect(() => {
 
   return (
     <View style={styles.backdropStyle}>
-      <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark" />
+      <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark" pointerEvents="none" />
       <Modalize
-        ref={modalRef}
-        modalHeight={800}
-        handlePosition="inside"
-        withHandle
-        modalStyle={styles.modal}
-        scrollViewProps={{ showsVerticalScrollIndicator: false }}
-        onOverlayPress={() => navigation.goBack()}
-        onClosed={() => navigation.goBack()}
-      >
-        <ScrollView contentContainerStyle={styles.content}>
-          {/* Hero Image Carousel */}
-          <View style={{ overflow: 'visible' }}>
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              style={styles.carousel}
-            >
-              {listing.ImageUrls?.map((img, i) =>
-              (
-                <TouchableOpacity
-                  key={i}
-                  onPress={() => {
-                    setLightboxIndex(i);
-                    setLightboxVisible(true);
-                  }}
-                >
-                  <Image source={{ uri: img }} style={styles.image} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+  ref={modalRef}
+  modalHeight={800}
+  handlePosition="inside"
+  withHandle
+  modalStyle={styles.modal}
+  onOverlayPress={() => navigation.goBack()}
+  onClosed={() => navigation.goBack()}
+  flatListProps={{
+    data: [listing.ID], // single row forces FlatList scroll engine
+    keyExtractor: (id) => String(id),
+    nestedScrollEnabled: true,
+    showsVerticalScrollIndicator: false,
+    contentContainerStyle: styles.content,
+    renderItem: () => (
+      <View>
+        {/* --- CAROUSEL (swap to FlatList horizontal for Android stability) --- */}
+        <View style={{ overflow: "visible" }}>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            style={styles.carousel}
+          >
+            {imageUrls?.map((img, i) => (
+              <TouchableOpacity
+                key={i}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setLightboxIndex(i);
+                  setLightboxVisible(true);
+                }}
+              >
+                <Image source={{ uri: img }} style={styles.image} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
 
-          {/* Favorite Button */}
-            <TouchableOpacity
-              style={styles.favoriteIcon}
-              onPress={() => toggleFavorite(listing.ID)}
-            >
-              <Ionicons
-                name={isFavorited ? 'heart' : 'heart-outline'}
-                size={28}
-                color={isFavorited ? 'red' : 'white'}
-              />
-            </TouchableOpacity>
+        {/* Favorite Button */}
+        <TouchableOpacity
+          style={styles.favoriteIcon}
+          onPress={() => toggleFavorite(listing.ID)}
+        >
+          <Ionicons
+            name={isFavorited ? "heart" : "heart-outline"}
+            size={28}
+            color={isFavorited ? "red" : "white"}
+          />
+        </TouchableOpacity>
 
-          {/* Title & Price */}
-          <Text style={styles.title}>{listing.Title}</Text>
-          <Text style={styles.price}>{listing.Price.toLocaleString()}</Text>
+        {/* Title & Price */}
+        <Text style={styles.title}>{listing.Title}</Text>
+        <Text style={styles.price}>{listing.Price.toLocaleString()}</Text>
 
-          {/* Metadata Row */}
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>{listing.Beds} 🛏️</Text>
-            <Text style={styles.metaText}>{listing.Baths} 🛁</Text>
-            {listing.SquareFootage != '' ? <Text style={styles.metaText}>{listing.SquareFootage} sqft</Text> :<></>}
-            {listing.Reception ? <Text style={styles.metaText}>Reception {listing.Reception}</Text> :<></>}
-            <Text style={styles.metaText}>📍{listing.Postcode}</Text>
-          </View>
+        {/* Metadata Row */}
+        <View style={styles.metaRow}>
+          <Text style={styles.metaText}>{listing.Beds} 🛏️</Text>
+          <Text style={styles.metaText}>{listing.Baths} 🛁</Text>
+          {listing.SquareFootage !== "" ? (
+            <Text style={styles.metaText}>{listing.SquareFootage} sqft</Text>
+          ) : null}
+          {listing.Reception ? (
+            <Text style={styles.metaText}>Reception {listing.Reception}</Text>
+          ) : null}
+          <Text style={styles.metaText}>📍{listing.Postcode}</Text>
+        </View>
 
-          {/* Last Viewed At */}
-          {lastViewedAt && (
-            <Text style={{ fontSize: 12, color: '#888', marginLeft: 16, marginBottom: 10 }}>
-              Last viewed: {new Date(lastViewedAt).toLocaleDateString()}
-            </Text>
-          )}
+        {lastViewedAt ? (
+          <Text style={{ fontSize: 12, color: "#888", marginLeft: 16, marginBottom: 10 }}>
+            Last viewed: {new Date(lastViewedAt).toLocaleDateString()}
+          </Text>
+        ) : null}
 
-          {/* Description */}
-          <Text style={styles.description}>{listing.Description}</Text>
+        <Text style={styles.description}>{listing.Description}</Text>
 
-          {/* Mini Map */}
-          <TouchableOpacity onPress={openMap} style={styles.mapContainer}>
+        {/* Mini Map */}
+        <TouchableOpacity onPress={openMap} style={styles.mapContainer} activeOpacity={0.9}>
+          <View pointerEvents="none">
             <MapView
               style={styles.map}
               region={{
@@ -130,39 +169,40 @@ useEffect(() => {
                 longitudeDelta: 0.005,
               }}
               pointerEvents="none"
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
             >
-              <Marker
-                coordinate={{
-                  latitude: listing.Latitude,
-                  longitude: listing.Longitude,
-                }}
-              />
+              <Marker coordinate={{ latitude: listing.Latitude, longitude: listing.Longitude }} />
             </MapView>
-            <Text style={styles.mapLabel}>Tap to open in Google Maps</Text>
-          </TouchableOpacity>
-
-          {/* Contact Buttons */}
-          <View style={styles.contactButtons}>
-            <TouchableOpacity style={styles.contactBtn} onPress={openDial}>
-              <Ionicons name="call" size={18} color="#fff" />
-              <Text style={styles.contactText}>Call</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.contactBtn} onPress={openMail}>
-              <Ionicons name="mail" size={18} color="#fff" />
-              <Text style={styles.contactText}>Email</Text>
-            </TouchableOpacity>
           </View>
+          <Text style={styles.mapLabel}>Tap to open in Google Maps</Text>
+        </TouchableOpacity>
 
-          {/* CTA Button */}
-          <TouchableOpacity style={styles.cta}>
-            <Text style={styles.ctaText}>Request Info / Book Viewing</Text>
+        {/* Contact Buttons */}
+        <View style={styles.contactButtons}>
+          <TouchableOpacity style={styles.contactBtn} onPress={openDial}>
+            <Ionicons name="call" size={18} color="#fff" />
+            <Text style={styles.contactText}>Call</Text>
           </TouchableOpacity>
-        </ScrollView>
-      </Modalize>
+          <TouchableOpacity style={styles.contactBtn} onPress={openMail}>
+            <Ionicons name="mail" size={18} color="#fff" />
+            <Text style={styles.contactText}>Email</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.cta}>
+          <Text style={styles.ctaText}>Request Info / Book Viewing</Text>
+        </TouchableOpacity>
+      </View>
+    ),
+  }}
+/>
 
       {/* Lightbox Viewer */}
       <ImageViewing
-        images={listing.ImageUrls?.map((uri) => ({ uri }))}
+        images={imageUrls?.map((uri) => ({ uri }))}
         imageIndex={lightboxIndex}
         visible={lightboxVisible}
         onRequestClose={() => setLightboxVisible(false)}

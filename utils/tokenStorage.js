@@ -1,7 +1,10 @@
 import * as SecureStore from 'expo-secure-store';
 
 export async function saveToken(token) {
-  await SecureStore.setItemAsync('auth_token', token);
+  console.log("Login response data:", token);
+console.log("token type:", typeof token);
+
+  await SecureStore.setItemAsync('auth_token', token.token);
 }
 
 export async function getToken() {

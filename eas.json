@@ -3,18 +3,18 @@
   "build": {
     "preview": {
       "env": {
-        "API_BASE_URL": "http://192.168.1.101:3001",
-        "API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
-        "APP_ENV": "development"
+        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.101:3001",
+        "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
+        "EXPO_PUBLIC_APP_ENV": "development"
       },
       "developmentClient": false,
       "autoIncrement": false
     },
     "production": {
       "env": {
-        "API_BASE_URL": "https://mrktfy-realestate.onrender.com",
-        "API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
-        "APP_ENV": "production"
+        "EXPO_PUBLIC_API_BASE_URL": "https://mrktfy-realestate.onrender.com",
+        "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
+        "EXPO_PUBLIC_APP_ENV": "production"
       },
       "autoIncrement": true
     }
