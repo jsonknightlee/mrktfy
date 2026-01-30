@@ -40,7 +40,7 @@ yarn-error.*
 
 eas.json
 
-package.json
+
 package-lock.json
 /android
 /ios
