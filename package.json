@@ -17,6 +17,7 @@
     "@react-navigation/stack": "^7.4.2",
     "axios": "^1.11.0",
     "babel-preset-expo": "~54.0.10",
+    "dotenv": "^17.2.3",
     "expo": "^54.0.32",
     "expo-apple-authentication": "~8.0.8",
     "expo-auth-session": "~7.0.10",
@@ -51,8 +52,7 @@
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "cross-env": "^10.0.0",
-    "env-cmd": "^10.1.0",
-    "react-native-worklets": "0.5.1"
+    "env-cmd": "^10.1.0"
   },
   "private": true
 }
