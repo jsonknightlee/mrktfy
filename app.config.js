@@ -1,5 +1,5 @@
 // app.config.js
-import 'dotenv/config';
+//import 'dotenv/config';
 
 export default () => ({
   name: "mrktfy",
@@ -40,7 +40,8 @@ export default () => ({
   web: {
     favicon: "./assets/mrktfy-icon.png"
   },
-  plugins: ["expo-secure-store", "expo-web-browser", "./plugins/withRNWorkletsPodfile"],
+  plugins: ["expo-secure-store", "expo-web-browser"
+  ],
   extra: {
     // ✅ EAS project link (required for dynamic config)
     eas: { projectId: "ceda178c-216c-4079-9b77-b98548c5a79c" },
@@ -50,8 +51,5 @@ export default () => ({
     API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? "",
     API_KEY: process.env.EXPO_PUBLIC_API_KEY ?? process.env.API_KEY ?? "",
     APP_ENV: process.env.EXPO_PUBLIC_APP_ENV ?? process.env.APP_ENV ?? "production",
-  },
-  expo:{
-    plugins: ["./plugins/withRNWorkletsPodfile"]
   }
 });
