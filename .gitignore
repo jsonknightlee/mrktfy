@@ -42,5 +42,3 @@ eas.json
 
 pnpm-lock.yaml
 package-lock.json
-/android
-/ios
