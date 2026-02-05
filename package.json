@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild --clean",
     "postprebuild": "node scripts/patch-podfile.js",
-    "postinstall": "node scripts/patch-podfile.js"
+    "postinstall": "node scripts/patch-podfile.js",
+    "eas-build-post-install": "node -e \"const fs=require('fs');const p=require('path');const glob=(d)=>{let out=[];for(const f of fs.readdirSync(d,{withFileTypes:true})){const fp=p.join(d,f.name);if(f.isDirectory()) out=out.concat(glob(fp)); else out.push(fp);}return out}; const root='node_modules/react-native-worklets'; const pkg=p.join(root,'package.json'); console.log('worklets pkg exists?',fs.existsSync(pkg)); if(fs.existsSync(pkg)) console.log('worklets version',require('./'+pkg).version); const hits=[]; if(fs.existsSync(root)){ for(const f of glob(root)){ if(f.toLowerCase().includes('rnworklets') || f.endsWith('rnworklets.h')) hits.push(f); } } console.log('RNWORKLETS HITS:', hits.slice(0,60));\""
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3",
