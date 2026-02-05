@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@expo/config-plugins": "^54.0.4",
     "cross-env": "^10.0.0",
     "env-cmd": "^10.1.0",
     "patch-package": "^8.0.1"
