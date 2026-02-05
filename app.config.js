@@ -40,7 +40,7 @@ export default () => ({
   web: {
     favicon: "./assets/mrktfy-icon.png"
   },
-  plugins: ["expo-secure-store", "expo-web-browser", "./plugins/withRNWorkletsPod"
+  plugins: ["expo-secure-store", "expo-web-browser", "./plugins/withRNWorkletsPod", "./plugins/withRnWorkletsPodFix"
   ],
   extra: {
     // ✅ EAS project link (required for dynamic config)
