@@ -11,6 +11,11 @@
       "autoIncrement": false
     },
     "production": {
+       "node": "20.18.0",
+      "yarn": false,
+      "ios": {
+        "image": "latest"
+      },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://mrktfy-realestate.onrender.com",
         "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
