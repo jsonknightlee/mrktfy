@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Image, Modal,
   Switch, ScrollView, Animated, TouchableWithoutFeedback
 } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DropDownPicker from 'react-native-dropdown-picker';
@@ -14,6 +14,7 @@ import { fetchNearbyListings } from '../services/realEstateApi';
 import { getToken } from '../utils/tokenStorage';
 import Constants from "expo-constants";
 import { useFavorites } from '../contexts/FavoritesContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { api } from '../services/api';
 
 // Show only if the date is before today (local device timezone)
@@ -100,6 +101,7 @@ export default function MapScreen() {
 
   // Favorites
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
+  const { currentTier, getMaxSearchRadius, plans, mockSubscription } = useSubscription();
   const navigation = useNavigation();
 
   const priceOptions = useMemo(() => {
@@ -206,16 +208,40 @@ export default function MapScreen() {
       setUserLocation({ latitude, longitude });
 
       try {
-        const nearby = await fetchNearbyListings(latitude, longitude, 5, isRental ? TYPE_RENT : TYPE_SALE);
+        const searchRadius = getMaxSearchRadius();
+        console.log(`🔍 Using search radius: ${searchRadius}km for ${currentTier} tier`);
+        const nearby = await fetchNearbyListings(latitude, longitude, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
         setListings(nearby);
+        
+        // If no listings found, fallback to London but keep user's GPS location
+        if (nearby.length === 0) {
+          console.log(' No listings found at current location, falling back to London...');
+          const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
+          setListings(londonNearby);
+          // Don't change userLocation - keep GPS location for the circle
+          console.log(' Using London listings, found:', londonNearby.length, 'listings');
+        }
       } catch (err) {
         console.error('Failed to fetch listings:', err);
+        // Fallback to London on error too
+        try {
+          const searchRadius = getMaxSearchRadius();
+          const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
+          setListings(londonNearby);
+          // Don't change userLocation - keep GPS location for the circle
+          console.log(' Error fallback to London, found:', londonNearby.length, 'listings');
+        } catch (fallbackErr) {
+          console.error('London fallback also failed:', fallbackErr);
+        }
       }
     })();
-  }, [isRental]);
+  }, [isRental, currentTier]);
 
   // re-apply when (new) listings arrive
   useEffect(() => {
+    // Always show the map, regardless of listings count
+    setTimeout(() => setMapVisible(true), 100);
+    
     if (listings.length > 0) {
       if (filtersTouched) {
         applyFilters(); // uses current filters state
@@ -223,7 +249,6 @@ export default function MapScreen() {
         setFilteredListings(listings);
         if (listings.length === 0) showToast('No listings found nearby.');
       }
-      setTimeout(() => setMapVisible(true), 100);
     } else {
       setFilteredListings([]);
     }
@@ -305,6 +330,40 @@ export default function MapScreen() {
         <Ionicons name="filter" size={24} color="black" />
       </TouchableOpacity>
 
+      {/* Subscription Tier Panel */}
+      <View style={styles.subscriptionPanel}>
+        <Text style={styles.subscriptionTitle}>Current Plan: {plans[currentTier]?.name || 'Free'}</Text>
+        <View style={styles.subscriptionControls}>
+          {Object.keys(plans).map((tierId) => {
+            const tier = plans[tierId];
+            // Show all tiers for testing, including unavailable ones
+            return (
+              <TouchableOpacity
+                key={tierId}
+                style={[
+                  styles.subscriptionBtn,
+                  currentTier === tierId && styles.subscriptionBtnActive
+                ]}
+                onPress={() => {
+                  mockSubscription(tierId);
+                  showToast(`Switched to ${tier.name} plan (${getMaxSearchRadius()}km radius)`);
+                }}
+              >
+                <Text style={[
+                  styles.subscriptionBtnText,
+                  currentTier === tierId && styles.subscriptionBtnActiveText
+                ]}>
+                  {tier.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.subscriptionInfo}>
+          Search Radius: {getMaxSearchRadius()}km • {listings.length} properties found
+        </Text>
+      </View>
+
       {mapVisible && (
         <MapView
           style={styles.map}
@@ -324,6 +383,20 @@ export default function MapScreen() {
             setSelectedListing(null);
           }}
         >
+          {/* User Radius Circle */}
+          {userLocation && (
+            <Circle
+              center={{
+                latitude: userLocation.latitude,
+                longitude: userLocation.longitude,
+              }}
+              radius={getMaxSearchRadius() * 1000} // Convert km to meters
+              strokeColor="rgba(0, 200, 255, 0.8)"
+              fillColor="rgba(0, 200, 255, 0.1)"
+              strokeWidth={2}
+            />
+          )}
+
           {filteredListings.map((listing) => (
             <Marker
               key={listing.ID}
@@ -548,11 +621,59 @@ const styles = StyleSheet.create({
   toastClose: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: '#2a2a2a',
     marginLeft: 8,
   },
-  toastCloseText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  toastCloseText: { color: '#fff', fontSize: 12 },
+
+  // Subscription Panel
+  subscriptionPanel: {
+    backgroundColor: '#fff',
+    margin: 16,
+    padding: 16,
+    borderRadius: 12,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  subscriptionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    color: '#333',
+  },
+  subscriptionControls: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  subscriptionBtn: {
+    backgroundColor: '#f0f0f0',
+    padding: 8,
+    borderRadius: 6,
+    marginRight: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  subscriptionBtnActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  subscriptionBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  subscriptionBtnActiveText: {
+    color: '#fff',
+  },
+  subscriptionInfo: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
 
   filterBtn: {
     position: 'absolute', top: 50, left: 20, zIndex: 10,

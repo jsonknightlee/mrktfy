@@ -25,7 +25,12 @@ export default () => ({
       NSCameraUsageDescription:
         "We use the camera to scan codes or take photos for your listings.",
       NSLocationWhenInUseUsageDescription:
-        "Show relevant results and services near your location."
+        "Show relevant results and services near your location.",
+      NSLocationAlwaysUsageDescription:
+        "Send you alerts about properties matching your criteria even when the app is not in use.",
+      NSLocationAlwaysAndWhenInUseUsageDescription:
+        "Send you alerts about properties matching your criteria when you're near them.",
+      UIBackgroundModes: ['location', 'background-fetch']
     }
   },
   android: {
@@ -40,8 +45,14 @@ export default () => ({
   web: {
     favicon: "./assets/mrktfy-icon.png"
   },
-  plugins: ["expo-secure-store", "expo-web-browser"
-  ],
+  plugins: ["expo-secure-store", "expo-web-browser", [
+    "expo-notifications",
+    {
+      icon: "./assets/notification-icon.png",
+      color: "#107AB0",
+      defaultChannel: "default"
+    }
+  ]],
   extra: {
     // ✅ EAS project link (required for dynamic config)
     eas: { projectId: "ceda178c-216c-4079-9b77-b98548c5a79c" },

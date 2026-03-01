@@ -1,6 +1,7 @@
 // screens/ProfileScreen.js
 import React, { useContext, useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, FlatList, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { getToken, deleteToken } from '../utils/tokenStorage';
 import { fetchUserProfile } from '../services/authApi';
 import { AuthContext } from '../contexts/AuthContext';
@@ -160,6 +161,15 @@ export default function ProfileScreen({ navigation }) {
               >
                 <Text style={styles.logoutText}>{loggingOut ? 'Logging out…' : 'Logout'}</Text>
               </TouchableOpacity>
+
+              {/* Subscription Button */}
+              <TouchableOpacity
+                style={styles.subscriptionButton}
+                onPress={() => navigation.navigate('Subscription')}
+              >
+                <Ionicons name="card" size={20} color="#007AFF" />
+                <Text style={styles.subscriptionButtonText}>Upgrade Plan</Text>
+              </TouchableOpacity>
             </>
           ) : (
             <Text>Couldn’t load profile.</Text>
@@ -237,6 +247,21 @@ const styles = StyleSheet.create({
   label: { fontSize: 16, marginBottom: 8 },
 
   logoutButton: { marginTop: 20, backgroundColor: '#f33', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
+  subscriptionButton: { 
+    marginTop: 12, 
+    backgroundColor: '#007AFF', 
+    paddingVertical: 10, 
+    paddingHorizontal: 16, 
+    borderRadius: 8, 
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  subscriptionButtonText: { 
+    color: '#fff', 
+    fontSize: 16, 
+    fontWeight: '600', 
+    marginLeft: 8 
+  },
   logoutText: { color: '#fff', fontWeight: 'bold' },
 
   section: { fontWeight: '700', fontSize: 16, marginTop: 4, marginBottom: 6, marginLeft: 12 },

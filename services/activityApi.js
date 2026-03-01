@@ -4,6 +4,7 @@ import { api } from './api';
 
 
 const transformItem = (it) => {
+      let imageUrls = []; // Declare imageUrls at the start
 
       if (typeof it.ImageUrls === 'string') {
         try {
@@ -14,7 +15,6 @@ const transformItem = (it) => {
             imageUrls = parsed
               .map((url) => url.replace(':p', ''))
               .filter((url) => url.includes('1024/768') && !seen.has(url) && seen.add(url));
-             
           }
            it.ImageUrls = imageUrls;
         } catch (e) {
@@ -31,12 +31,14 @@ const transformItem = (it) => {
 export const getFavorites = async () => {
   const { data } = await api.get('/activity/users/me/favorites');
   const items = data?.items ?? [];
+  //console.log('activityApi: getFavorites items', items);
   return items.map(transformItem);
 };
 
 export const getHistory = async (limit = 30) => {
   const { data } = await api.get('/activity/users/me/history', { params: { limit } });
   const items = data?.items ?? [];
+  //console.log('activityApi: getHistory items', items);
   return items.map(transformItem);
 };
 
