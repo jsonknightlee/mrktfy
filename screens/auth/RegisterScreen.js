@@ -1,7 +1,17 @@
 // screens/auth/RegisterScreen.js
-import React, { useState } from 'react';
-import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { registerUser } from '../../services/authApi';
+import React, { useState, useEffect } from 'react';
+import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
+import { registerUser, loginWithGoogle, loginWithApple, fetchUserProfile } from '../../services/authApi';
+import { saveToken } from '../../utils/tokenStorage';
+import { AuthContext } from '../../contexts/AuthContext';
+
+import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { Ionicons } from '@expo/vector-icons';
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function RegisterScreen({ navigation }) {
   const [form, setForm] = useState({
@@ -11,6 +21,57 @@ export default function RegisterScreen({ navigation }) {
     Lastname: '',
   });
   const [submitting, setSubmitting] = useState(false);
+  const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
+
+  // --- Google Auth ---
+  const redirectUri = makeRedirectUri({ scheme: 'mrktfy' });
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
+    iosClientId:  '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com',
+    androidClientId: 'YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com',
+    webClientId:  '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
+    redirectUri,
+    scopes: ['openid', 'profile', 'email'],
+  });
+
+  useEffect(() => {
+    const handleGoogleLogin = async () => {
+      if (response?.type !== 'success') return;
+      try {
+        const { authentication } = response;
+        const token = await loginWithGoogle(authentication.accessToken);
+        await saveToken(token);
+        const user = await fetchUserProfile(token);
+        Alert.alert('Welcome', `Hello ${user.Firstname}!`);
+        if (typeof signIn === 'function') await signIn(token);
+        else setIsLoggedIn?.(true);
+      } catch (err) {
+        console.error(err);
+        Alert.alert('Google Sign Up Failed', 'Could not sign up with Google');
+      }
+    };
+    handleGoogleLogin();
+  }, [response, signIn, setIsLoggedIn]);
+
+  const handleAppleLogin = async () => {
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const token = await loginWithApple(credential.identityToken);
+      await saveToken(token);
+      const user = await fetchUserProfile(token);
+      Alert.alert('Welcome', `Hello ${user.Firstname}!`);
+      if (typeof signIn === 'function') await signIn(token);
+      else setIsLoggedIn?.(true);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Apple Sign Up Failed', 'Could not sign up with Apple');
+    }
+  };
 
   const handleChange = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -103,6 +164,23 @@ export default function RegisterScreen({ navigation }) {
       <TouchableOpacity onPress={() => !submitting && navigation.navigate('Login')}>
         <Text style={styles.link}>Already have an account? Log in</Text>
       </TouchableOpacity>
+
+      <View style={styles.divider} />
+
+      <TouchableOpacity style={styles.oauthBtn} onPress={() => !submitting && promptAsync()}>
+        <Ionicons name="logo-google" size={20} color="#fff" style={{ marginRight: 8 }} />
+        <Text style={styles.oauthText}>Sign up with Google</Text>
+      </TouchableOpacity>
+
+      {Platform.OS === 'ios' && (
+        <AppleAuthentication.AppleAuthenticationButton
+          buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+          cornerRadius={6}
+          style={{ width: '100%', height: 44, marginTop: 12 }}
+          onPress={() => !submitting && handleAppleLogin()}
+        />
+      )}
     </View>
   );
 }
@@ -128,4 +206,14 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
   link: { color: '#007AFF', textAlign: 'center', marginTop: 8 },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 16 },
+  oauthBtn: {
+    backgroundColor: '#DB4437',
+    paddingVertical: 12,
+    borderRadius: 6,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  oauthText: { color: '#fff', fontWeight: 'bold' },
 });

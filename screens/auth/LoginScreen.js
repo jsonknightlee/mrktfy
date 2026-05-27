@@ -151,7 +151,6 @@ export default function LoginScreen({ navigation }) {
 
       <View style={styles.divider} />
 
-      {/* OAuth buttons (uncomment when ready)
       <TouchableOpacity style={styles.oauthBtn} onPress={() => !submitting && promptAsync()}>
         <Ionicons name="logo-google" size={20} color="#fff" style={{ marginRight: 8 }} />
         <Text style={styles.oauthText}>Sign in with Google</Text>
@@ -165,7 +164,7 @@ export default function LoginScreen({ navigation }) {
           style={{ width: '100%', height: 44, marginTop: 12 }}
           onPress={() => !submitting && handleAppleLogin()}
         />
-      )} */}
+      )}
     </View>
   );
 }
