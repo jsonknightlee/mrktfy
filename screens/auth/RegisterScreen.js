@@ -24,7 +24,7 @@ export default function RegisterScreen({ navigation }) {
   const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
 
   // --- Google Auth ---
-  const redirectUri = makeRedirectUri({ scheme: 'mrktfy' });
+  const redirectUri = makeRedirectUri({ scheme: 'mrktfy', useProxy: true });
   console.log('🔐 [GOOGLE] Redirect URI:', redirectUri);
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
