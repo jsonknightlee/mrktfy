@@ -52,7 +52,7 @@ export default function VirtualTourModal({ visible, onClose, url, title }) {
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <Ionicons name="close" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{title}</Text>
+          <Text style={styles.headerTitle}>{String(title || '')}</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -61,7 +61,7 @@ export default function VirtualTourModal({ visible, onClose, url, title }) {
           {loading && (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>Loading {title}...</Text>
+              <Text style={styles.loadingText}>Loading {String(title || '')}...</Text>
             </View>
           )}
           

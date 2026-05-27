@@ -1,55 +1,103 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Alert,
-  TextInput,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useStripePaymentSheet, createApplePayConfig } from '../services/stripeService';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import { processSubscriptionPayment, confirmSubscriptionPayment } from '../services/paymentService';
 
 export default function PaymentScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { tier, billingInterval = 'month' } = route.params || {};
-  const [cardNumber, setCardNumber] = useState('');
-  const [expiryDate, setExpiryDate] = useState('');
-  const [cvv, setCvv] = useState('');
-  const [cardholderName, setCardholderName] = useState('');
+  const { updateSubscription } = useSubscription();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+
+  const { initializePaymentSheet, openPaymentSheet, loading: sheetLoading } = useStripePaymentSheet();
 
   const price = tier?.prices?.[billingInterval];
   const isTrial = tier?.trial?.enabled;
   const trialDuration = tier?.trial?.durationDays;
 
-  const handlePayment = async () => {
-    if (!cardNumber || !expiryDate || !cvv || !cardholderName) {
-      Alert.alert('Error', 'Please fill in all payment fields');
-      return;
-    }
+  // Initialize payment sheet when component mounts
+  useEffect(() => {
+    initializePayment();
+  }, []);
 
+  const initializePayment = async () => {
     setIsProcessing(true);
-    
     try {
-      // TODO: Integrate Stripe payment processing
-      console.log('Processing payment for tier:', tier.key, 'interval:', billingInterval);
-      
-      // Simulate payment processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const successMessage = isTrial 
+      // Get user info (you might get this from AuthContext)
+      const userEmail = 'user@example.com'; // Replace with actual user email
+      const userName = 'Mrktfy User'; // Replace with actual user name
+
+      // Process subscription payment
+      const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName);
+
+      if (!paymentResult.success) {
+        throw new Error(paymentResult.error);
+      }
+
+      // Create Apple Pay configuration
+      const applePayConfig = createApplePayConfig(tier, billingInterval);
+
+      // Initialize payment sheet with the payment intent and Apple Pay config
+      const { success } = await initializePaymentSheet({
+        paymentIntent: paymentResult.paymentIntent,
+        ephemeralKey: paymentResult.ephemeralKey,
+        customer: paymentResult.customer,
+        applePayConfig,
+      });
+
+      if (success) {
+        setIsReady(true);
+      } else {
+        throw new Error('Failed to initialize payment sheet');
+      }
+    } catch (error) {
+      console.error('Payment initialization error:', error);
+      Alert.alert('Error', 'Failed to initialize payment. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePayment = async () => {
+    setIsProcessing(true);
+
+    try {
+      // Open Stripe Payment Sheet
+      const { success: paymentSuccess } = await openPaymentSheet();
+
+      if (!paymentSuccess) {
+        // User cancelled or payment failed
+        return;
+      }
+
+      // Payment successful - update subscription
+      await updateSubscription(tier.key);
+
+      // Confirm payment with backend (optional, for webhooks)
+      // await confirmSubscriptionPayment(paymentIntentId, tier.key, billingInterval);
+
+      const successMessage = isTrial
         ? `You've successfully started your ${trialDuration}-day free trial of ${tier.name}!`
         : `You've successfully subscribed to ${tier.name}!`;
-      
+
       Alert.alert(
         isTrial ? 'Trial Started!' : 'Payment Successful!',
         successMessage,
         [
           {
             text: 'OK',
-            onPress: () => navigation.navigate('Map'),
+            onPress: () => navigation.navigate('Tabs', { screen: 'Map' }),
           },
         ]
       );
@@ -97,57 +145,9 @@ export default function PaymentScreen({ route, navigation }) {
       <View style={styles.paymentForm}>
         <Text style={styles.sectionTitle}>Payment Information</Text>
         
-        {/* Cardholder Name */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Cardholder Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="John Doe"
-            value={cardholderName}
-            onChangeText={setCardholderName}
-            autoCapitalize="words"
-          />
-        </View>
-
-        {/* Card Number */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Card Number</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="1234 5678 9012 3456"
-            value={cardNumber}
-            onChangeText={setCardNumber}
-            keyboardType="numeric"
-            maxLength={19}
-          />
-        </View>
-
-        {/* Expiry Date & CVV */}
-        <View style={styles.row}>
-          <View style={[styles.inputGroup, styles.halfWidth]}>
-            <Text style={styles.inputLabel}>Expiry Date</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="MM/YY"
-              value={expiryDate}
-              onChangeText={setExpiryDate}
-              maxLength={5}
-            />
-          </View>
-          
-          <View style={[styles.inputGroup, styles.halfWidth]}>
-            <Text style={styles.inputLabel}>CVV</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="123"
-              value={cvv}
-              onChangeText={setCvv}
-              keyboardType="numeric"
-              maxLength={4}
-              secureTextEntry
-            />
-          </View>
-        </View>
+        <Text style={styles.paymentDescription}>
+          You'll be redirected to a secure payment form powered by Stripe.
+        </Text>
 
         {/* Security Note */}
         <View style={styles.securityNote}>
@@ -159,9 +159,9 @@ export default function PaymentScreen({ route, navigation }) {
 
         {/* Pay Button */}
         <TouchableOpacity
-          style={[styles.payButton, { opacity: isProcessing ? 0.6 : 1 }]}
+          style={[styles.payButton, { opacity: (isProcessing || !isReady) ? 0.6 : 1 }]}
           onPress={handlePayment}
-          disabled={isProcessing}
+          disabled={isProcessing || !isReady}
         >
           {isProcessing ? (
             <ActivityIndicator color="#fff" />
@@ -269,29 +269,12 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 20,
   },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
+  paymentDescription: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#f8f9fa',
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  halfWidth: {
-    flex: 1,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
   },
   securityNote: {
     flexDirection: 'row',

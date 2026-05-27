@@ -15,6 +15,7 @@ import { getToken } from '../utils/tokenStorage';
 import Constants from "expo-constants";
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { AdBanner } from '../services/adService';
 import { api } from '../services/api';
 
 // Show only if the date is before today (local device timezone)
@@ -101,17 +102,24 @@ export default function MapScreen() {
 
   // Favorites
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
-  const { currentTier, getMaxSearchRadius, plans, mockSubscription } = useSubscription();
+  const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, loading, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus } = useSubscription();
   const navigation = useNavigation();
+
+  // Get trial status for badge
+  const trialStatus = getTrialStatus();
+  const subscriptionName = getCurrentSubscriptionLevel()?.name || 'Free';
+  const badgeText = trialStatus.isInTrial 
+    ? `${subscriptionName} (${trialStatus.daysRemaining}d)` 
+    : subscriptionName;
 
   const priceOptions = useMemo(() => {
     const step = isRental ? 100 : 100000;
     const max = isRental ? 5000 : 900000;
     const arr = [];
     for (let i = 0; i <= max; i += step) {
-      arr.push({ label: `£${i.toLocaleString()}`, value: i.toString() });
+      arr.push({ label: `£${i.toLocaleString()}`, value: i.toString(), key: `price-${i}` });
     }
-    if (!isRental) arr.push({ label: '£1,000,000+', value: '1000001' });
+    if (!isRental) arr.push({ label: '£1,000,000+', value: '1000001', key: 'price-1000001' });
     return arr;
   }, [isRental]);
 
@@ -213,23 +221,20 @@ export default function MapScreen() {
         const nearby = await fetchNearbyListings(latitude, longitude, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
         setListings(nearby);
         
-        // If no listings found, fallback to London but keep user's GPS location
         if (nearby.length === 0) {
           console.log(' No listings found at current location, falling back to London...');
           const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
           setListings(londonNearby);
-          // Don't change userLocation - keep GPS location for the circle
           console.log(' Using London listings, found:', londonNearby.length, 'listings');
         }
       } catch (err) {
         console.error('Failed to fetch listings:', err);
-        // Fallback to London on error too
         try {
           const searchRadius = getMaxSearchRadius();
           const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
           setListings(londonNearby);
           // Don't change userLocation - keep GPS location for the circle
-          console.log(' Error fallback to London, found:', londonNearby.length, 'listings');
+          console.log('Error fallback to London, found:', londonNearby.length, 'listings');
         } catch (fallbackErr) {
           console.error('London fallback also failed:', fallbackErr);
         }
@@ -294,6 +299,16 @@ export default function MapScreen() {
     setFilterModalVisible(false);
   };
 
+  const handlePropertyOpenWithAd = (listing) => {
+    // Navigate directly - ListingDetailScreen will handle showing the ad
+    navigation?.navigate?.('ListingDetail', { listing });
+  };
+
+  const handleFavoriteToggleWithAd = (listingId) => {
+    // Directly toggle favorite without showing ad
+    toggleFavorite(listingId);
+  };
+
   useEffect(() => {
     if (selectedListing) {
       Animated.timing(badgeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
@@ -313,7 +328,7 @@ export default function MapScreen() {
     <View style={styles.container}>
       {/* Toast */}
       {toastVisible && (
-        <Animated.View style={[styles.toastWrap, { transform: [{ translateY: toastY }] }]} >
+        <Animated.View style={[styles.toastWrap, { transform: [{ translateY: toastY }] }]}>
           <TouchableWithoutFeedback onPress={hideToast}>
             <View style={styles.toast}>
               <Ionicons name="alert-circle" size={18} color="#fff" style={{ marginRight: 8 }} />
@@ -330,39 +345,16 @@ export default function MapScreen() {
         <Ionicons name="filter" size={24} color="black" />
       </TouchableOpacity>
 
-      {/* Subscription Tier Panel */}
-      <View style={styles.subscriptionPanel}>
-        <Text style={styles.subscriptionTitle}>Current Plan: {plans[currentTier]?.name || 'Free'}</Text>
-        <View style={styles.subscriptionControls}>
-          {Object.keys(plans).map((tierId) => {
-            const tier = plans[tierId];
-            // Show all tiers for testing, including unavailable ones
-            return (
-              <TouchableOpacity
-                key={tierId}
-                style={[
-                  styles.subscriptionBtn,
-                  currentTier === tierId && styles.subscriptionBtnActive
-                ]}
-                onPress={() => {
-                  mockSubscription(tierId);
-                  showToast(`Switched to ${tier.name} plan (${getMaxSearchRadius()}km radius)`);
-                }}
-              >
-                <Text style={[
-                  styles.subscriptionBtnText,
-                  currentTier === tierId && styles.subscriptionBtnActiveText
-                ]}>
-                  {tier.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        <Text style={styles.subscriptionInfo}>
-          Search Radius: {getMaxSearchRadius()}km • {listings.length} properties found
+      {/* Subscription Badge */}
+      <TouchableOpacity 
+        style={styles.subscriptionBadge}
+        onPress={() => navigation.navigate('Subscription')}
+      >
+        <Ionicons name="diamond-outline" size={12} color="#fff" style={{ marginRight: 4 }} />
+        <Text style={styles.subscriptionBadgeText}>
+          {badgeText}
         </Text>
-      </View>
+      </TouchableOpacity>
 
       {mapVisible && (
         <MapView
@@ -480,13 +472,13 @@ export default function MapScreen() {
             ))}
           </ScrollView>
 
-          <TouchableOpacity onPress={() => navigation.navigate('ListingDetail', { listing: selectedListing })} activeOpacity={0.8}>
+          <TouchableOpacity onPress={() => handlePropertyOpenWithAd(selectedListing)} activeOpacity={0.8}>
             <Text style={styles.cardTitle}>{selectedListing.Title}</Text>
 
             {/* Price + Heart */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
               <Text style={{ fontSize: 16, fontWeight: '600' }}>Price: {selectedListing.Price}</Text>
-              <TouchableOpacity onPress={() => toggleFavorite(selectedListing.ID)}>
+              <TouchableOpacity onPress={() => handleFavoriteToggleWithAd(selectedListing.ID)}>
                 <Ionicons
                   name={getFavoriteStatus(selectedListing.ID)?.isFavorited ? 'heart' : 'heart-outline'}
                   size={22}
@@ -511,7 +503,7 @@ export default function MapScreen() {
       {/* Filter Modal */}
       <Modal animationType="slide" transparent visible={filterModalVisible}>
         <View style={styles.modalOverlay}>
-          <View className="filterModal" style={styles.filterModal}>
+          <View style={styles.filterModal}>
             <Text style={styles.modalTitle}>Filter Listings</Text>
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Property Type:</Text>
@@ -548,7 +540,7 @@ export default function MapScreen() {
               placeholder="Select Minimum Beds"
               open={openBeds}
               value={filters.beds}
-              items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: `${n}`, value: `${n}` }))}
+              items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: `${n}`, value: `${n}`, key: `${n}` }))}
               setOpen={setOpenBeds}
               setValue={(cb) => updateFilters({ ...filters, beds: cb(filters.beds) })}
             />
@@ -558,7 +550,7 @@ export default function MapScreen() {
               placeholder="Select Minimum Baths"
               open={openBaths}
               value={filters.baths}
-              items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: `${n}`, value: `${n}` }))}
+              items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: `${n}`, value: `${n}`, key: `${n}` }))}
               setOpen={setOpenBaths}
               setValue={(cb) => updateFilters({ ...filters, baths: cb(filters.baths) })}
             />
@@ -580,13 +572,16 @@ export default function MapScreen() {
               >
                 <Text style={styles.modalBtnText}>Apply</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.resetBtn]} onPress={resetFilters}>
+              <TouchableOpacity style={[styles.modalBtn, styles.resetBtn].filter(Boolean)} onPress={resetFilters}>
                 <Text style={styles.modalBtnText}>Reset</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
+
+      {/* Banner Ad for Free Plan Users */}
+      {shouldShowAd('search') && <AdBanner style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }} />}
     </View>
   );
 }
@@ -702,5 +697,30 @@ const styles = StyleSheet.create({
   resetBtn: { backgroundColor: '#FF3B30', marginRight: 0, marginLeft: 10 },
   modalBtnText: { color: 'white', fontWeight: 'bold' },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  switchLabel: { fontSize: 14, fontWeight: '500' }
-});
+  switchLabel: { fontSize: 14, fontWeight: '500' },
+
+  // Subscription Badge
+  subscriptionBadge: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    zIndex: 10,
+  },
+  subscriptionBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  }
+})
+

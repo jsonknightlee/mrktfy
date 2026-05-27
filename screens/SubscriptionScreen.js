@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSubscription } from '../contexts/SubscriptionContext';
 
 // Real plan configuration
 const planConfig = {
@@ -22,6 +23,44 @@ const planConfig = {
     trialCopy: "Start your 7-day free trial"
   },
   plans: [
+    {
+      key: "free",
+      name: "Free",
+      tagline: "Basic property search",
+      bestFor: "Casual browsing",
+      isAvailable: true,
+      badges: ["Always free"],
+      prices: {
+        month: { "amount": 0, "display": "£0" },
+        year: { "amount": 0, "display": "£0" }
+      },
+      trial: {
+        enabled: false,
+      },
+      features: [
+        "Basic property search",
+        "Limited property details",
+        "Save up to 10 properties",
+        "Map view",
+        "Basic filters",
+        "Ads supported"
+      ],
+      limits: {
+        savedSearchesMax: 5,
+        alertsEnabled: false,
+        refreshPriority: 'normal',
+        notificationsPerMonth: 5,
+        arSearchesPerMonth: 10,
+        adsEnabled: true,
+        adsFrequency: 'always',
+      },
+      color: "#666",
+      searchRadiusKm: 2,
+      cta: {
+        type: "current_plan",
+        label: "Current plan"
+      }
+    },
     {
       key: "prospector",
       name: "Prospector",
@@ -44,15 +83,20 @@ const planConfig = {
         "Unlimited favourites",
         "Price-drop alerts",
         "Faster listing refresh",
-        "Enhanced AR highlights"
+        "Enhanced AR highlights",
+        "Ad-free experience"
       ],
       limits: {
         savedSearchesMax: 20,
         alertsEnabled: true,
         refreshPriority: "high",
         notificationsPerMonth: 100,
-        arSearchesPerMonth: 50
+        arSearchesPerMonth: 50,
+        adsEnabled: false,
+        adsFrequency: 'never',
       },
+      color: "#007AFF",
+      searchRadiusKm: 5,
       cta: {
         type: "start_trial_or_manage",
         label: "Start 7-day free trial"
@@ -134,8 +178,18 @@ const planConfig = {
 
 export default function SubscriptionScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { currentTier } = useSubscription();
   const [selectedTier, setSelectedTier] = useState(null);
   const [billingInterval, setBillingInterval] = useState(planConfig.defaultInterval);
+
+  // Update plan CTAs based on actual current tier
+  const plansWithCTA = planConfig.plans.map(plan => ({
+    ...plan,
+    cta: {
+      type: plan.key === currentTier ? 'current_plan' : 'subscribe',
+      label: plan.key === currentTier ? 'Current plan' : plan.trial?.enabled ? 'Start trial' : 'Subscribe'
+    }
+  }));
 
   const handleTierSelect = (tier) => {
     if (!tier.isAvailable) {
@@ -148,6 +202,21 @@ export default function SubscriptionScreen({ navigation }) {
   const handleSubscribe = (tier) => {
     if (!tier.isAvailable) {
       Alert.alert('Coming Soon', `${tier.name} plan will be available soon!`);
+      return;
+    }
+
+    // Handle Free plan - no payment needed
+    if (tier.key === 'free') {
+      Alert.alert(
+        'Free Plan',
+        'You\'re already on the Free plan! Enjoy basic property search with ads.',
+        [
+          {
+            text: 'OK',
+            style: 'default',
+          },
+        ]
+      );
       return;
     }
 
@@ -185,7 +254,7 @@ export default function SubscriptionScreen({ navigation }) {
           styles.tierCard,
           selectedTier?.key === tier.key && styles.selectedTierCard,
           isComingSoon && styles.comingSoonCard,
-          { borderLeftColor: tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1' },
+          { borderLeftColor: tier.key === 'free' ? '#666' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1' },
         ]}
       >
         {/* Badges */}
@@ -195,7 +264,7 @@ export default function SubscriptionScreen({ navigation }) {
               key={index}
               style={[
                 styles.badge,
-                { backgroundColor: badge === 'Recommended' ? '#FF6B6B' : badge === 'Coming soon' ? '#666' : '#007AFF' }
+                { backgroundColor: badge === 'Recommended' ? '#FF6B6B' : badge === 'Coming soon' ? '#666' : badge === 'Always free' ? '#10B981' : '#007AFF' }
               ]}
             >
               <Text style={styles.badgeText}>{badge}</Text>
@@ -237,7 +306,7 @@ export default function SubscriptionScreen({ navigation }) {
         {/* Features */}
         <View style={styles.featuresContainer}>
           {tier.features.map((feature, index) => (
-            <Text key={index} style={[styles.feature, { color: isComingSoon ? '#999' : '#333' }]}>
+            <Text key={`feature-${tier.id}-${index}`} style={[styles.feature, { color: isComingSoon ? '#999' : '#333' }]}>
               {feature}
             </Text>
           ))}
@@ -248,7 +317,7 @@ export default function SubscriptionScreen({ navigation }) {
           style={[
             styles.subscribeButton,
             { 
-              backgroundColor: isComingSoon ? '#ccc' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1',
+              backgroundColor: isComingSoon ? '#ccc' : tier.key === 'free' ? '#666' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1',
               opacity: isComingSoon ? 0.6 : 1
             }
           ]}
@@ -270,71 +339,47 @@ export default function SubscriptionScreen({ navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{planConfig.uiCopy?.planScreenTitle || 'Choose your plan'}</Text>
-        <View style={styles.headerSpacer} />
+        <Text style={styles.headerTitle}>Subscription Plans</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      {/* Billing Interval Toggle */}
-      <View style={styles.billingToggle}>
-        <TouchableOpacity
-          style={[
-            styles.billingOption,
-            billingInterval === 'month' && styles.billingOptionActive
-          ]}
-          onPress={() => setBillingInterval('month')}
-        >
-          <Text style={[
-            styles.billingOptionText,
-            billingInterval === 'month' && styles.billingOptionTextActive
-          ]}>
-            Monthly
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.billingOption,
-            billingInterval === 'year' && styles.billingOptionActive
-          ]}
-          onPress={() => setBillingInterval('year')}
-        >
-          <Text style={[
-            styles.billingOptionText,
-            billingInterval === 'year' && styles.billingOptionTextActive
-          ]}>
-            Yearly
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Trial Banner */}
-      {planConfig.trial?.enabled && (
-        <View style={styles.trialBanner}>
-          <Text style={styles.trialBannerTitle}>{planConfig.trial.trialCopy}</Text>
-        </View>
-      )}
-
-      {/* Subscription Tiers */}
       <ScrollView 
+        style={styles.content}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.tiersContainer}
       >
-        {planConfig.plans.map((tier) => (
+        <Text style={styles.subtitle}>Choose the plan that fits your needs</Text>
+        
+        {/* Billing Toggle */}
+        <View style={styles.billingToggle}>
+          <TouchableOpacity
+            style={[styles.billingOption, billingInterval === 'month' && styles.billingOptionActive]}
+            onPress={() => setBillingInterval('month')}
+          >
+            <Text style={[styles.billingText, billingInterval === 'month' && styles.billingTextActive]}>Monthly</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.billingOption, billingInterval === 'year' && styles.billingOptionActive]}
+            onPress={() => setBillingInterval('year')}
+          >
+            <Text style={[styles.billingText, billingInterval === 'year' && styles.billingTextActive]}>Yearly</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Plans */}
+        {plansWithCTA.map((tier) => (
           <View key={tier.key} style={styles.tierWrapper}>
             {renderTierCard(tier)}
           </View>
         ))}
-      </ScrollView>
 
-      {/* Bottom CTA */}
-      <View style={styles.bottomContainer}>
-        <TouchableOpacity
-          style={styles.compareButton}
-          onPress={() => Alert.alert('Compare Plans', 'Detailed comparison feature coming soon!')}
-        >
-          <Ionicons name="git-compare" size={20} color="#007AFF" />
-          <Text style={styles.compareButtonText}>Compare All Plans</Text>
-        </TouchableOpacity>
-      </View>
+        {/* Trial Banner */}
+        {planConfig.trial?.enabled && (
+          <View style={styles.trialBanner}>
+            <Text style={styles.trialBannerTitle}>{planConfig.trial.trialCopy}</Text>
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -362,10 +407,21 @@ const styles = StyleSheet.create({
   headerSpacer: {
     flex: 1,
   },
+  content: {
+    flex: 1,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 20,
+    marginBottom: 20,
+  },
   billingToggle: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    margin: 20,
+    marginHorizontal: 20,
+    marginBottom: 20,
     borderRadius: 12,
     padding: 4,
     borderWidth: 1,
@@ -380,17 +436,18 @@ const styles = StyleSheet.create({
   billingOptionActive: {
     backgroundColor: '#007AFF',
   },
-  billingOptionText: {
+  billingText: {
     fontSize: 14,
     fontWeight: '500',
     color: '#666',
   },
-  billingOptionTextActive: {
+  billingTextActive: {
     color: '#fff',
   },
   trialBanner: {
     backgroundColor: '#e8f5e8',
     marginHorizontal: 20,
+    marginBottom: 20,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -401,47 +458,51 @@ const styles = StyleSheet.create({
     color: '#2d6a2d',
   },
   tiersContainer: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
     gap: 16,
   },
   tierWrapper: {
-    marginBottom: 16,
+    marginBottom: 0,
   },
   tierCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 2,
-    borderLeftWidth: 4,
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    borderLeftWidth: 5,
     borderColor: '#e9ecef',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
+    marginBottom: 20,
   },
   selectedTierCard: {
     borderColor: '#007AFF',
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.15,
     elevation: 8,
   },
   comingSoonCard: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   badgesContainer: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
+    gap: 6,
+    marginBottom: 12,
+    flexWrap: 'wrap',
   },
   badge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 6,
   },
   badgeText: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   overlay: {
     position: 'absolute',
@@ -449,10 +510,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: 20,
   },
   overlayText: {
     fontSize: 18,
@@ -463,64 +524,80 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   tierNameContainer: {
     flex: 1,
   },
   tierName: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 6,
+    letterSpacing: -0.5,
   },
   tagline: {
     fontSize: 14,
     color: '#666',
-    fontStyle: 'italic',
+    fontWeight: '500',
   },
   priceContainer: {
     alignItems: 'flex-end',
   },
   price: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: '700',
     color: '#333',
+    letterSpacing: -1,
   },
   period: {
     fontSize: 16,
     color: '#666',
-    fontWeight: '500',
+    fontWeight: '600',
     marginLeft: 4,
   },
   subtext: {
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 4,
+    fontWeight: '500',
   },
   bestFor: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 16,
-    fontStyle: 'italic',
+    marginBottom: 20,
+    fontWeight: '500',
+    backgroundColor: '#f8f9fa',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
   },
   featuresContainer: {
-    gap: 8,
+    gap: 10,
   },
   feature: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#333',
-    lineHeight: 20,
+    lineHeight: 22,
+    paddingLeft: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: '#e9ecef',
   },
   subscribeButton: {
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 28,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   subscribeButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   bottomContainer: {
     padding: 20,

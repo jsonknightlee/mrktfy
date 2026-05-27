@@ -63,8 +63,8 @@ export default function CollapsibleInfoSection({ title, icon, data, children }) 
       >
         <View style={styles.headerLeft}>
           <Ionicons name={icon} size={20} color="#007AFF" />
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.count}>({dataArray.length})</Text>
+          <Text style={styles.title}>{String(title || '')}</Text>
+          <Text style={styles.count}>({String(dataArray.length)})</Text>
         </View>
         <Ionicons
           name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -79,8 +79,8 @@ export default function CollapsibleInfoSection({ title, icon, data, children }) 
             <ScrollView showsVerticalScrollIndicator={false}>
               {dataArray.map((item, index) => (
                 <View key={index} style={styles.item}>
-                  <Text style={styles.itemLabel}>{item.label}</Text>
-                  <Text style={styles.itemValue}>{item.value}</Text>
+                  <Text style={styles.itemLabel}>{String(item.label || '')}</Text>
+                  <Text style={styles.itemValue}>{String(item.value || '')}</Text>
                 </View>
               ))}
             </ScrollView>

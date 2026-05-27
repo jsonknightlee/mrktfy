@@ -66,16 +66,15 @@ export default function PropertyTimeline({ timeline }) {
               {/* Left side - Event type and dot */}
               <View style={styles.eventType}>
                 <View style={styles.timelineDot} />
-                <Text style={styles.eventTypeText}>{event.type}</Text>
               </View>
               
               {/* Right side - Details */}
               <View style={styles.eventDetails}>
                 <View style={styles.eventHeader}>
-                  <Text style={styles.eventDate}>{event.date}</Text>
-                  <Text style={styles.eventStatus}>{event.status}</Text>
+                  <Text style={styles.eventDate}>{String(event.date || '')}</Text>
+                  <Text style={styles.eventStatus}>{String(event.status || '')}</Text>
                 </View>
-                <Text style={styles.eventPrice}>{event.price}</Text>
+                <Text style={styles.eventPrice}>{String(event.price || '')}</Text>
                 
                 {/* Property details if available */}
                 {event.details && (
@@ -84,19 +83,19 @@ export default function PropertyTimeline({ timeline }) {
                       {event.details.bedrooms && (
                         <View style={styles.metaItem}>
                           <Ionicons name="bed" size={14} color="#666" />
-                          <Text style={styles.metaText}>{event.details.bedrooms} bed</Text>
+                          <Text style={styles.metaText}>{String(event.details.bedrooms)} bed</Text>
                         </View>
                       )}
                       {event.details.bathrooms && (
                         <View style={styles.metaItem}>
                           <Ionicons name="water" size={14} color="#666" />
-                          <Text style={styles.metaText}>{event.details.bathrooms} bath</Text>
+                          <Text style={styles.metaText}>{String(event.details.bathrooms)} bath</Text>
                         </View>
                       )}
                       {event.details.receptions && (
                         <View style={styles.metaItem}>
                           <Ionicons name="home" size={14} color="#666" />
-                          <Text style={styles.metaText}>{event.details.receptions} reception</Text>
+                          <Text style={styles.metaText}>{String(event.details.receptions)} reception</Text>
                         </View>
                       )}
                     </View>
@@ -126,7 +125,7 @@ export default function PropertyTimeline({ timeline }) {
                               <View style={styles.moreImagesOverlay}>
                                 <Ionicons name="images" size={16} color="#fff" />
                                 <Text style={styles.moreImagesText}>
-                                  +{event.details.images.length - 4}
+                                  +{String(event.details.images.length - 4)}
                                 </Text>
                               </View>
                             </TouchableOpacity>

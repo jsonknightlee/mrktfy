@@ -19,18 +19,19 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale')
     const contentType = res.headers.get('content-type');
     if (!res.ok || !contentType?.includes('application/json')) {
       const text = await res.text();
+      console.log(JSON.stringify(res))
       console.error('Unexpected response:', res.status, text);
       throw new Error(`Unexpected server response (${res.status})`);
     }
 
     let data = await res.json();
-    console.log('🔍 Raw API response:', data);
-    console.log('🔍 API response type:', typeof data);
-    console.log('🔍 API response length:', Array.isArray(data) ? data.length : 'not an array');
-
-    // Debug: Check what fields are available in the response
-    console.log('🔍 API Response fields check:');
-    console.log('📊 Available fields:', Object.keys(data));
+    //console.log('🔍 Raw API response:', data);
+    //console.log('🔍 API response type:', typeof data);
+    //console.log('🔍 API response length:', Array.isArray(data) ? data.length : 'not an array');
+//
+    //// Debug: Check what fields are available in the response
+    //console.log('🔍 API Response fields check:');
+    //console.log('📊 Available fields:', Object.keys(data));
     
     // Handle different response structures
     let listings = [];
@@ -122,7 +123,7 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale')
 
     return data;
   } catch (err) {
-    console.error('fetchNearbyListings ERROR:', err.message);
+    console.error('fetchNearbyListings ERROR:', JSON.stringify(err));
     return [];
   }
 }

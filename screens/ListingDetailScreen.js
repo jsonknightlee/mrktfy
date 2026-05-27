@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,12 @@ import MapView, { Marker } from 'react-native-maps';
 import ImageViewing from 'react-native-image-viewing';
 import { Ionicons } from '@expo/vector-icons';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import { AdBanner } from '../services/adService';
 import VirtualTourModal from '../components/VirtualTourModal';
 import PropertyTimeline from '../components/PropertyTimeline';
 import CollapsibleInfoSection from '../components/CollapsibleInfoSection';
+import AdModal from '../components/AdModal';
 
 const { width } = Dimensions.get('window');
 const MODAL_HEIGHT = Dimensions.get("window").height * 0.9;
@@ -36,24 +39,52 @@ export default function ListingDetailScreen({ route, navigation }) {
   const stations = listing.Stations;
   const additionalInfo = listing.AdditionalInfo;
 
+  // Defensive checks to ensure data is valid
+  const safeTimeline = timeline && (typeof timeline === 'string' || Array.isArray(timeline)) ? timeline : null;
+  const safeSchools = schools && Array.isArray(schools) ? schools : null;
+  const safeStations = stations && Array.isArray(stations) ? stations : null;
+  const safeAdditionalInfo = additionalInfo && (typeof additionalInfo === 'string' || typeof additionalInfo === 'object') ? additionalInfo : null;
+
   const [virtualTourModalVisible, setVirtualTourModalVisible] = useState(false);
   const [floorPlanModalVisible, setFloorPlanModalVisible] = useState(false);
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
+  const { currentTier, shouldShowAd } = useSubscription();
   const isFavorited = getFavoriteStatus(listing.ID)?.isFavorited ?? !!route.params.listing?.isFavorited;
   const lastViewedAt = getFavoriteStatus(listing.ID)?.lastViewedAt;
 
+  // Ad modal state
+  const [adModalVisible, setAdModalVisible] = useState(false);
+  const adShownRef = useRef(false);
 
-console.log('Fav: '+ JSON.stringify(listing))
-console.log('🏠 Listing data fields:', {
-  hasPropertyTimeline: !!(listing.PropertyTimeline),
-  propertyTimelineLength: listing.PropertyTimeline?.length,
-  hasSchools: !!(listing.Schools),
-  schoolsLength: listing.Schools?.length,
-  hasStations: !!(listing.Stations),
-  stationsLength: listing.Stations?.length,
-  hasAdditionalInfo: !!(listing.AdditionalInfo),
-  additionalInfoLength: listing.AdditionalInfo?.length,
-});
+  // Show ad modal for Free plan users when screen loads (only once per session)
+  useEffect(() => {
+    if (shouldShowAd('property_open') && !adShownRef.current) {
+      adShownRef.current = true;
+      // Small delay to ensure screen is fully loaded
+      const timer = setTimeout(() => {
+        setAdModalVisible(true);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []); // Empty dependency array - only run once on mount
+
+  const handleAdUpgrade = () => {
+    setAdModalVisible(false);
+    navigation.navigate('Subscription');
+  };
+
+
+// console.log('Fav: '+ JSON.stringify(listing))
+// console.log('🏠 Listing data fields:', {
+//   hasPropertyTimeline: !!(listing.PropertyTimeline),
+//   propertyTimelineLength: listing.PropertyTimeline?.length,
+//   hasSchools: !!(listing.Schools),
+//   schoolsLength: listing.Schools?.length,
+//   hasStations: !!(listing.Stations),
+//   stationsLength: listing.Stations?.length,
+//   hasAdditionalInfo: !!(listing.AdditionalInfo),
+//   additionalInfoLength: listing.AdditionalInfo?.length,
+// });
 
 const normalizeImageUrls = (val) => {
   if (!val) return [];
@@ -86,12 +117,10 @@ const normalizeImageUrls = (val) => {
   return [];
 };
 
-const imageUrls = normalizeImageUrls(listing.ImageUrls ?? listing.imageUrls ?? listing.imageUrl);
-console.log('🖼️ Final imageUrls for listing', listing.ID, ':', imageUrls.slice(0, 5)); // Debug first 5
-
-  
+  const imageUrls = normalizeImageUrls(listing.ImageUrls ?? listing.imageUrls ?? listing.imageUrl);
 
 useEffect(() => {
+  console.log('🖼️ Final imageUrls for listing', listing.ID, ':', imageUrls.slice(0, 5)); // Debug first 5
   modalRef.current?.open();
   setLastViewed(listing.ID); // 👈 if you want to record the view here too
 }, []);
@@ -186,20 +215,22 @@ useEffect(() => {
         </TouchableOpacity>
 
         {/* Title & Price */}
-        <Text style={styles.title}>{listing.Title}</Text>
-        <Text style={styles.price}>{listing.Price.toLocaleString()}</Text>
+        <Text style={styles.title}>{String(listing.Title || '')}</Text>
+        <Text style={styles.price}>
+          {typeof listing.Price === 'number' ? listing.Price.toLocaleString() : String(listing.Price || '')}
+        </Text>
 
         {/* Metadata Row */}
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>{listing.Beds} beds</Text>
-          <Text style={styles.metaText}>{listing.Baths} baths</Text>
+          <Text style={styles.metaText}>{String(listing.Beds || '')} beds</Text>
+          <Text style={styles.metaText}>{String(listing.Baths || '')} baths</Text>
           {listing.SquareFootage !== "" ? (
-            <Text style={styles.metaText}>{listing.SquareFootage} sqft</Text>
+            <Text style={styles.metaText}>{String(listing.SquareFootage)} sqft</Text>
           ) : null}
           {listing.Reception ? (
-            <Text style={styles.metaText}>Reception {listing.Reception}</Text>
+            <Text style={styles.metaText}>Reception {String(listing.Reception)}</Text>
           ) : null}
-          <Text style={styles.metaText}>{listing.Postcode}</Text>
+          <Text style={styles.metaText}>{String(listing.Postcode || '')}</Text>
         </View>
 
         {lastViewedAt ? (
@@ -208,7 +239,7 @@ useEffect(() => {
           </Text>
         ) : null}
 
-        <Text style={styles.description}>{listing.Description}</Text>
+        <Text style={styles.description}>{String(listing.Description || '')}</Text>
 
         {/* Mini Map */}
         <TouchableOpacity onPress={openMap} style={styles.mapContainer} activeOpacity={0.9}>
@@ -264,31 +295,31 @@ useEffect(() => {
         </View>
 
         {/* New Information Sections - Only show if data exists */}
-        {timeline && timeline.length > 0 && (
-          <PropertyTimeline timeline={timeline} />
+        {safeTimeline && (typeof safeTimeline === 'string' || safeTimeline.length > 0) && (
+          <PropertyTimeline timeline={safeTimeline} />
         )}
-        
-        {schools && schools.length > 0 && (
-          <CollapsibleInfoSection 
-            title="Nearby Schools" 
-            icon="school" 
-            data={schools} 
+
+        {safeSchools && safeSchools.length > 0 && (
+          <CollapsibleInfoSection
+            title="Nearby Schools"
+            icon="school"
+            data={safeSchools}
           />
         )}
-        
-        {stations && stations.length > 0 && (
-          <CollapsibleInfoSection 
-            title="Nearby Stations" 
-            icon="train" 
-            data={stations} 
+
+        {safeStations && safeStations.length > 0 && (
+          <CollapsibleInfoSection
+            title="Nearby Stations"
+            icon="train"
+            data={safeStations}
           />
         )}
-        
-        {additionalInfo && additionalInfo.length > 0 && (
-          <CollapsibleInfoSection 
-            title="Additional Information" 
-            icon="information-circle" 
-            data={additionalInfo} 
+
+        {safeAdditionalInfo && (typeof safeAdditionalInfo === 'string' || Object.keys(safeAdditionalInfo).length > 0) && (
+          <CollapsibleInfoSection
+            title="Additional Information"
+            icon="information-circle"
+            data={safeAdditionalInfo}
           />
         )}
 
@@ -303,6 +334,9 @@ useEffect(() => {
         <View style={styles.refIdContainer}>
           <Text style={styles.refIdText}>Ref ID: {listing.ZooplaID || listing.ID}</Text>
         </View>
+
+        {/* Banner Ad for Free Plan Users */}
+        {shouldShowAd('property_open') && <AdBanner style={{ marginHorizontal: 16, marginBottom: 10 }} />}
       </View>
     ),
   }}
@@ -330,6 +364,15 @@ useEffect(() => {
         url={generateFloorPlanUrl()}
         title="Floor Plan"
       />
+
+      {/* Ad Modal for Free Plan Users */}
+      {adModalVisible && (
+        <AdModal
+          visible={adModalVisible}
+          onClose={() => setAdModalVisible(false)}
+          onUpgrade={handleAdUpgrade}
+        />
+      )}
     </View>
   );
 }

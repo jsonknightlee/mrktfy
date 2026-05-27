@@ -6,6 +6,24 @@ export default () => ({
   slug: "mrktfy",
   scheme: "mrktfy",
   owner: "mrktfy",
+  ios: {
+    supportsTablet: true,
+    bundleIdentifier: "com.mrktfy.mrktfy",
+    buildNumber: "18",
+    capabilities: ['com.apple.DeveloperID.payment'],
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+      NSCameraUsageDescription:
+        "We use the camera to scan codes or take photos for your listings.",
+      NSLocationWhenInUseUsageDescription:
+        "Show relevant results and services near your location.",
+      NSLocationAlwaysUsageDescription:
+        "Send you alerts about properties matching your criteria even when the app is not in use.",
+      NSLocationAlwaysAndWhenInUseUsageDescription:
+        "Send you alerts about properties matching your criteria when you're near them.",
+      UIBackgroundModes: ['location', 'background-fetch']
+    }
+  },
   version: "1.0.9",
   orientation: "portrait",
   icon: "./assets/mrktfy-icon.png",
@@ -20,6 +38,7 @@ export default () => ({
     supportsTablet: true,
     bundleIdentifier: "com.mrktfy.mrktfy",
     buildNumber: "18",
+    capabilities: ['com.apple.DeveloperID.payment'],
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSCameraUsageDescription:
@@ -45,14 +64,27 @@ export default () => ({
   web: {
     favicon: "./assets/mrktfy-icon.png"
   },
-plugins: ["expo-secure-store", "expo-web-browser", "./plugins/withRNWorkletsPod", "./plugins/withRnWorkletsPodFix", [
+plugins: [
+  "expo-secure-store",
+  "expo-web-browser",
+  "./plugins/withRNWorkletsPod",
+  "./plugins/withRnWorkletsPodFix",
+  [
     "expo-notifications",
     {
       icon: "./assets/notification-icon.png",
       color: "#107AB0",
       defaultChannel: "default"
     }
-  ]],
+  ],
+  [
+    "@stripe/stripe-react-native",
+    {
+      androidPackage: "com.reactnativestripesdk",
+      appleMerchantIdentifier: "merchant.com.yourcompany.mrktfy"
+    }
+  ]
+],
   extra: {
     // ✅ EAS project link (required for dynamic config)
     eas: { projectId: "ceda178c-216c-4079-9b77-b98548c5a79c" },

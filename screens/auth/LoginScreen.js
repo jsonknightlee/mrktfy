@@ -65,17 +65,31 @@ export default function LoginScreen({ navigation }) {
 
     setSubmitting(true);
     try {
+      console.log('🔐 [LOGIN] Attempting login for:', Email);
       // ✅ still send as Username if your backend expects it
       const token = await loginUser({ Username: Email, Password });
+      console.log('🔐 [LOGIN] Login successful, token received');
       await saveToken(token);
       const user = await fetchUserProfile(token);
+      console.log('👤 [LOGIN] User profile loaded:', user?.Firstname);
       Alert.alert('Welcome', `Hello ${user.Firstname}!`);
       if (typeof signIn === 'function') await signIn(token);
       else setIsLoggedIn?.(true);
     } catch (err) {
-      console.log(JSON.stringify(err));
-      const msg = err?.response?.data?.error || err?.message || 'Unknown error';
-      Alert.alert('Login failed', msg);
+      console.log('🔐 [LOGIN] Login error:', JSON.stringify(err));
+      
+      // Handle network errors gracefully
+      if (err?.code === 'ERR_NETWORK' || err?.message?.includes('Network request failed')) {
+        console.warn('🔐 [LOGIN] Network error - login unavailable');
+        Alert.alert(
+          'Network Error', 
+          'Unable to connect to the server. Please check your internet connection and try again.\n\nIf you\'re on a different network, you may need to be on the same network as the server.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        const msg = err?.response?.data?.error || err?.message || 'Unknown error';
+        Alert.alert('Login failed', msg);
+      }
     } finally {
       setSubmitting(false);
     }

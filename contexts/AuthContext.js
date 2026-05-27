@@ -31,8 +31,12 @@ export default function AuthProvider({ children }) {
     isLoggedIn,
     setIsLoggedIn, // keep for now to avoid refactors
     signIn: async (token) => {
+      console.log('🔐 Auth: signIn called with token');
       await saveToken(token);
+      console.log('🔐 Auth: Token saved');
       setIsLoggedIn(true);
+      console.log('🔐 Auth: setIsLoggedIn(true) called');
+      console.log('🔐 Auth: signIn completed');
     },
     signOut: async () => {
       await deleteToken();
