@@ -6,7 +6,6 @@ import { saveToken } from '../../utils/tokenStorage';
 import { AuthContext } from '../../contexts/AuthContext';
 
 import * as Google from 'expo-auth-session/providers/google';
-import { makeRedirectUri } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,14 +23,11 @@ export default function RegisterScreen({ navigation }) {
   const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
 
   // --- Google Auth ---
-  const redirectUri = makeRedirectUri({ scheme: 'mrktfy', useProxy: true });
-  console.log('🔐 [GOOGLE] Redirect URI:', redirectUri);
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
     iosClientId:  '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com',
     androidClientId: 'YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com',
     webClientId:  '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
-    redirectUri,
     scopes: ['openid', 'profile', 'email'],
   });
 
@@ -47,8 +43,14 @@ export default function RegisterScreen({ navigation }) {
         if (typeof signIn === 'function') await signIn(token);
         else setIsLoggedIn?.(true);
       } catch (err) {
-        console.error(err);
-        Alert.alert('Google Sign Up Failed', 'Could not sign up with Google');
+        console.error('❌ [GOOGLE SIGNUP] Error:', err);
+        console.error('❌ [GOOGLE SIGNUP] Response:', response);
+        console.error('❌ [GOOGLE SIGNUP] Authentication:', response?.authentication);
+        console.error('❌ [GOOGLE SIGNUP] Error response:', err?.response?.data);
+        console.error('❌ [GOOGLE SIGNUP] Error status:', err?.response?.status);
+        console.error('❌ [GOOGLE SIGNUP] Error message:', err?.message);
+        const msg = err?.response?.data?.error || err?.message || 'Could not sign up with Google';
+        Alert.alert('Google Sign Up Failed', msg);
       }
     };
     handleGoogleLogin();
