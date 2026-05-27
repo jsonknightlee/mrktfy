@@ -25,6 +25,7 @@ export default function RegisterScreen({ navigation }) {
 
   // --- Google Auth ---
   const redirectUri = makeRedirectUri({ scheme: 'mrktfy' });
+  console.log('🔐 [GOOGLE] Redirect URI:', redirectUri);
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
     iosClientId:  '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com',
