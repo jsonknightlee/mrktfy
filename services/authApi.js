@@ -1,8 +1,11 @@
 // services/authApi.js
 import { authApi } from './api';
 
-export const fetchUserProfile = async () => {
-  const { data } = await authApi.get('/me');
+export const fetchUserProfile = async (token) => {
+  const config = token
+    ? { headers: { Authorization: `Bearer ${token}` } }
+    : undefined;
+  const { data } = await authApi.get('/me', config);
   return data;
 };
 

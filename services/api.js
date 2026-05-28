@@ -1,7 +1,7 @@
 // services/api.js
 import axios from 'axios';
 import Constants from 'expo-constants';
-import { getToken } from '../services/authService';
+import { getToken } from '../utils/tokenStorage';
 
 const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
 console.log('🔧 [API] Expo config extra:', extra);
