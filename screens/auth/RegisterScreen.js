@@ -21,13 +21,15 @@ export default function RegisterScreen({ navigation }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
+  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
+    || '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com';
 
   // --- Google Auth ---
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
-    iosClientId:  '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com',
-    androidClientId: 'YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com',
-    webClientId:  '771793399175-2ga58d94bhfieu0e9ks3bd7f68u0p1p1.apps.googleusercontent.com',
+    expoClientId: googleClientId,
+    iosClientId: googleClientId,
+    androidClientId: googleClientId,
+    webClientId: googleClientId,
     scopes: ['openid', 'profile', 'email'],
   });
 
@@ -35,8 +37,12 @@ export default function RegisterScreen({ navigation }) {
     const handleGoogleLogin = async () => {
       if (response?.type !== 'success') return;
       try {
-        const { authentication } = response;
-        const token = await loginWithGoogle(authentication.accessToken);
+        const accessToken = response.authentication?.accessToken;
+        if (!accessToken) {
+          throw new Error('Google did not return an access token.');
+        }
+
+        const token = await loginWithGoogle(accessToken);
         await saveToken(token);
         const user = await fetchUserProfile(token);
         Alert.alert('Welcome', `Hello ${user.Firstname}!`);
@@ -170,7 +176,11 @@ export default function RegisterScreen({ navigation }) {
 
       <View style={styles.divider} />
 
-      <TouchableOpacity style={styles.oauthBtn} onPress={() => !submitting && promptAsync()}>
+      <TouchableOpacity
+        style={styles.oauthBtn}
+        onPress={() => !submitting && request && promptAsync()}
+        disabled={submitting || !request}
+      >
         <Ionicons name="logo-google" size={20} color="#fff" style={{ marginRight: 8 }} />
         <Text style={styles.oauthText}>Sign up with Google</Text>
       </TouchableOpacity>

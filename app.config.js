@@ -1,29 +1,11 @@
 // app.config.js
-//import 'dotenv/config';
+import 'dotenv/config';
 
 export default () => ({
   name: "mrktfy",
   slug: "mrktfy",
   scheme: "mrktfy",
   owner: "mrktfy",
-  ios: {
-    supportsTablet: true,
-    bundleIdentifier: "com.mrktfy.mrktfy",
-    buildNumber: "18",
-    capabilities: ['com.apple.DeveloperID.payment'],
-    infoPlist: {
-      ITSAppUsesNonExemptEncryption: false,
-      NSCameraUsageDescription:
-        "We use the camera to scan codes or take photos for your listings.",
-      NSLocationWhenInUseUsageDescription:
-        "Show relevant results and services near your location.",
-      NSLocationAlwaysUsageDescription:
-        "Send you alerts about properties matching your criteria even when the app is not in use.",
-      NSLocationAlwaysAndWhenInUseUsageDescription:
-        "Send you alerts about properties matching your criteria when you're near them.",
-      UIBackgroundModes: ['location', 'background-fetch']
-    }
-  },
   version: "1.0.9",
   orientation: "portrait",
   icon: "./assets/mrktfy-icon.png",
@@ -37,8 +19,7 @@ export default () => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.mrktfy.mrktfy",
-    buildNumber: "18",
-    capabilities: ['com.apple.DeveloperID.payment'],
+    buildNumber: "60",
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSCameraUsageDescription:
@@ -49,7 +30,14 @@ export default () => ({
         "Send you alerts about properties matching your criteria even when the app is not in use.",
       NSLocationAlwaysAndWhenInUseUsageDescription:
         "Send you alerts about properties matching your criteria when you're near them.",
-      UIBackgroundModes: ['location', 'background-fetch']
+      UIBackgroundModes: ['location'],
+      // OAuth URL schemes for development
+      CFBundleURLTypes: [
+        {
+          CFBundleURLName: 'com.mrktfy.oauth',
+          CFBundleURLSchemes: ['mrktfy', 'com.mrktfy.mrktfy', 'exp', 'com.googleusercontent.apps']
+        }
+      ]
     }
   },
   android: {
@@ -67,21 +55,18 @@ export default () => ({
 plugins: [
   "expo-secure-store",
   "expo-web-browser",
-  "./plugins/withRNWorkletsPod",
-  "./plugins/withRnWorkletsPodFix",
+  [
+    "@stripe/stripe-react-native",
+    {
+      merchantIdentifier: process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID ?? "merchant.com.mrktfy"
+    }
+  ],
   [
     "expo-notifications",
     {
       icon: "./assets/notification-icon.png",
       color: "#107AB0",
       defaultChannel: "default"
-    }
-  ],
-  [
-    "@stripe/stripe-react-native",
-    {
-      androidPackage: "com.reactnativestripesdk",
-      appleMerchantIdentifier: "merchant.com.yourcompany.mrktfy"
     }
   ]
 ],
@@ -94,5 +79,7 @@ plugins: [
     API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? "",
     API_KEY: process.env.EXPO_PUBLIC_API_KEY ?? process.env.API_KEY ?? "",
     APP_ENV: process.env.EXPO_PUBLIC_APP_ENV ?? process.env.APP_ENV ?? "production",
+    GOOGLE_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? "",
+    APPLE_CLIENT_ID: process.env.EXPO_PUBLIC_APPLE_CLIENT_ID ?? "com.mrktfy.mrktfy",
   }
 });

@@ -3,11 +3,12 @@ import axios from 'axios';
 import Constants from 'expo-constants';
 import { getToken } from '../services/authService';
 
-console.log('🔧 [API] Constants.expoConfig.extra:', Constants.expoConfig.extra);
-console.log('🔧 [API] API_BASE_URL from config:', Constants.expoConfig.extra?.API_BASE_URL);
-console.log('🔧 [API] API_KEY from config:', Constants.expoConfig.extra?.API_KEY ? 'SET' : 'NOT SET');
-
-const { API_BASE_URL, API_KEY } = Constants.expoConfig.extra;
+const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
+console.log('🔧 [API] Expo config extra:', extra);
+console.log('🔧 [API] API_BASE_URL from config:', extra.API_BASE_URL);
+console.log('🔧 [API] API_KEY from config:', extra.API_KEY ? 'SET' : 'NOT SET');
+const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
 
 const commonHeaders = {
   'Content-Type': 'application/json',
@@ -20,12 +21,14 @@ console.log('🔧 [API] Final commonHeaders:', commonHeaders);
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: commonHeaders,
+  timeout: 15000,
 });
 
 // Auth-scoped API (/auth routes)
 export const authApi = axios.create({
   baseURL: `${API_BASE_URL}/auth`,
   headers: commonHeaders,
+  timeout: 15000,
 });
 
 console.log('🔧 [API] Created API instances with baseURL:', API_BASE_URL);

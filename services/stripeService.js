@@ -13,7 +13,7 @@ export const StripeProvider = ({ children }) => {
   return (
     <StripeProviderExpo
       publishableKey={STRIPE_PUBLISHABLE_KEY}
-      merchantIdentifier="merchant.com.yourcompany.mrktfy"
+      merchantIdentifier={process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID || 'merchant.com.mrktfy'}
     >
       {children}
     </StripeProviderExpo>

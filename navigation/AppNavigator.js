@@ -1,6 +1,6 @@
 // navigation/AppNavigator.js
 import React, { useContext } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -62,7 +62,13 @@ function MainTabs() {
 export default function AppNavigator() {
   const { isLoggedIn } = useContext(AuthContext);
 
-  if (isLoggedIn === null) return null; // or a splash/loader
+  if (isLoggedIn === null) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#107AB0" />
+      </View>
+    );
+  }
 
   return (
     // 🔑 This key forces a full remount when auth flips
@@ -119,3 +125,12 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    flex: 1,
+    justifyContent: 'center',
+  },
+});
