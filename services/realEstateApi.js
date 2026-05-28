@@ -19,9 +19,12 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale')
     const contentType = res.headers.get('content-type');
     if (!res.ok || !contentType?.includes('application/json')) {
       const text = await res.text();
-      console.log(JSON.stringify(res))
-      console.error('Unexpected response:', res.status, text);
-      throw new Error(`Unexpected server response (${res.status})`);
+      console.error('Unexpected nearby listings response:', {
+        status: res.status,
+        url,
+        body: text,
+      });
+      throw new Error(`Unexpected server response (${res.status}): ${text}`);
     }
 
     let data = await res.json();
@@ -123,7 +126,13 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale')
 
     return data;
   } catch (err) {
-    console.error('fetchNearbyListings ERROR:', JSON.stringify(err));
+    console.error('fetchNearbyListings ERROR:', {
+      message: err?.message,
+      lat,
+      lng,
+      radiusKm,
+      type,
+    });
     return [];
   }
 }
