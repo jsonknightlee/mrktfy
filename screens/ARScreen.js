@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
-import { Magnetometer } from 'expo-sensors';
 import { useNavigation } from '@react-navigation/native';
 import { getBearing, getDistance } from '../utils/geoUtils';
 import { fetchNearbyListings } from '../services/realEstateApi';
@@ -22,7 +21,6 @@ const REFRESH_INTERVAL_MS = 30000;
 const MAX_DISTANCE_M = 350;       // how far to consider listings
 const CONE_HALF_ANGLE_DEG = 18;   // +/- degrees from heading considered "in front"
 const HEADING_ALPHA = 0.22;       // smoothing factor (0.15 smoother, 0.3 snappier)
-const MAG_UPDATE_MS = 200;        // magnetometer update interval
 
 // --- helpers ---
 const angleDiff = (a, b) => {
@@ -72,6 +70,21 @@ const pickInstantListing = ({
   }
 
   return best;
+};
+
+const headingFromLocation = (headingData) => {
+  const trueHeading = headingData?.trueHeading;
+  const magneticHeading = headingData?.magHeading;
+
+  if (Number.isFinite(trueHeading) && trueHeading >= 0) {
+    return trueHeading;
+  }
+
+  if (Number.isFinite(magneticHeading) && magneticHeading >= 0) {
+    return magneticHeading;
+  }
+
+  return null;
 };
 
 export default function ARScreen() {
@@ -186,16 +199,24 @@ export default function ARScreen() {
     }
   };
 
-  // Get heading from magnetometer (smoothed)
+  // Get compass heading from Location so it matches geo bearing degrees.
   useEffect(() => {
-    const sub = Magnetometer.addListener((data) => {
-      let angle = Math.atan2(data.y, data.x) * (180 / Math.PI);
-      if (angle < 0) angle += 360;
-      setHeading((prev) => smoothHeading(prev, angle, HEADING_ALPHA));
-    });
+    let headingSub;
+    let isMounted = true;
 
-    Magnetometer.setUpdateInterval(MAG_UPDATE_MS);
-    return () => sub.remove();
+    (async () => {
+      headingSub = await Location.watchHeadingAsync((headingData) => {
+        const nextHeading = headingFromLocation(headingData);
+        if (!isMounted || nextHeading == null) return;
+
+        setHeading((prev) => smoothHeading(prev, nextHeading, HEADING_ALPHA));
+      });
+    })();
+
+    return () => {
+      isMounted = false;
+      headingSub?.remove();
+    };
   }, []);
 
   if (!permission || !permission.granted) {
