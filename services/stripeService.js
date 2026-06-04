@@ -1,8 +1,19 @@
 import { StripeProvider as StripeProviderExpo, useStripe, usePaymentSheet } from '@stripe/stripe-react-native';
+import Constants from 'expo-constants';
 import React, { useState, useEffect } from 'react';
 
 // Stripe publishable key from environment
-const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+const STRIPE_PUBLISHABLE_KEY =
+  process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ||
+  Constants.expoConfig?.extra?.STRIPE_PUBLISHABLE_KEY ||
+  '';
+const APPLE_MERCHANT_ID =
+  process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID ||
+  Constants.expoConfig?.extra?.APPLE_MERCHANT_ID ||
+  '';
+const ENABLE_APPLE_PAY =
+  process.env.EXPO_PUBLIC_ENABLE_APPLE_PAY === 'true' ||
+  Constants.expoConfig?.extra?.ENABLE_APPLE_PAY === true;
 
 // Stripe Provider component
 export const StripeProvider = ({ children }) => {
@@ -13,7 +24,7 @@ export const StripeProvider = ({ children }) => {
   return (
     <StripeProviderExpo
       publishableKey={STRIPE_PUBLISHABLE_KEY}
-      merchantIdentifier={process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID || 'merchant.com.mrktfy'}
+      merchantIdentifier={APPLE_MERCHANT_ID || undefined}
     >
       {children}
     </StripeProviderExpo>
@@ -24,34 +35,44 @@ export const StripeProvider = ({ children }) => {
 export const useStripePaymentSheet = () => {
   const { initPaymentSheet, presentPaymentSheet, loading } = usePaymentSheet();
 
-  const initializePaymentSheet = async ({ paymentIntent, ephemeralKey, customer, applePayConfig }) => {
-    // In development mode, skip payment sheet initialization entirely
-    // and simulate successful initialization
-    if (process.env.EXPO_PUBLIC_APP_ENV === 'development' && paymentIntent.includes('test')) {
-      console.log('🔧 Development mode: Skipping payment sheet initialization');
-      
-      // Simulate a brief delay to show loading
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      return { success: true };
+  const initializePaymentSheet = async ({ paymentIntent, setupIntent, ephemeralKey, customer, applePayConfig, primaryButtonLabel }) => {
+    if (!STRIPE_PUBLISHABLE_KEY) {
+      return { success: false, error: 'Stripe publishable key is not configured' };
     }
 
-    const { error } = await initPaymentSheet({
-      paymentIntentClientSecret: paymentIntent,
-      customer,
-      ephemeralKey,
+    if (!paymentIntent && !setupIntent) {
+      return { success: false, error: 'Missing Stripe intent client secret' };
+    }
+
+    const setupParams = {
       merchantDisplayName: 'Mrktfy',
-      allowsDelayedPaymentMethods: true,
+      allowsDelayedPaymentMethods: false,
       defaultBillingDetails: {
         name: 'Mrktfy User',
       },
-      // Apple Pay configuration (dynamic)
-      applePay: applePayConfig,
-      // Enable Apple Pay and other payment methods
-      paymentMethodTypes: ['card', 'apple_pay'],
-      // Return URL for iOS redirects
       returnURL: 'mrktfy://stripe-redirect',
-    });
+      primaryButtonLabel,
+    };
+
+    if (ENABLE_APPLE_PAY && applePayConfig) {
+      setupParams.applePay = applePayConfig;
+    }
+
+    if (paymentIntent) {
+      setupParams.paymentIntentClientSecret = paymentIntent;
+    } else {
+      setupParams.setupIntentClientSecret = setupIntent;
+    }
+
+    if (customer) {
+      setupParams.customerId = customer;
+    }
+
+    if (ephemeralKey) {
+      setupParams.customerEphemeralKeySecret = ephemeralKey;
+    }
+
+    const { error } = await initPaymentSheet(setupParams);
 
     if (error) {
       console.error('❌ Payment sheet initialization error:', error);
@@ -62,16 +83,6 @@ export const useStripePaymentSheet = () => {
   };
 
   const openPaymentSheet = async () => {
-    // In development mode, simulate payment sheet presentation
-    if (process.env.EXPO_PUBLIC_APP_ENV === 'development') {
-      console.log('🔧 Development mode: Simulating payment sheet presentation');
-      
-      // Simulate a brief delay to show the payment UI
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      return { success: true };
-    }
-
     const { error } = await presentPaymentSheet();
 
     if (error) {
@@ -95,7 +106,7 @@ export const createPaymentIntent = async (amount, currency = 'gbp', metadata = {
     const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
     const API_KEY = process.env.EXPO_PUBLIC_API_KEY;
 
-    const response = await fetch(`${API_BASE_URL}/api/payments/create-payment-intent`, {
+    const response = await fetch(`${API_BASE_URL}/api/stripe/create-payment-intent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -126,7 +137,7 @@ export const createCustomer = async (email, name) => {
     const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
     const API_KEY = process.env.EXPO_PUBLIC_API_KEY;
 
-    const response = await fetch(`${API_BASE_URL}/api/payments/create-customer`, {
+    const response = await fetch(`${API_BASE_URL}/api/stripe/create-customer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -156,7 +167,7 @@ export const createEphemeralKey = async (customerId) => {
     const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
     const API_KEY = process.env.EXPO_PUBLIC_API_KEY;
 
-    const response = await fetch(`${API_BASE_URL}/api/payments/create-ephemeral-key`, {
+    const response = await fetch(`${API_BASE_URL}/api/stripe/create-ephemeral-key`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -186,16 +197,24 @@ export const formatAmount = (amount) => {
 
 // Helper to create Apple Pay configuration
 export const createApplePayConfig = (tier, billingInterval) => {
+  if (!ENABLE_APPLE_PAY || !APPLE_MERCHANT_ID) {
+    return null;
+  }
+
   const price = tier?.prices?.[billingInterval];
   const amount = (price?.amount / 100).toFixed(2); // Convert from pence to pounds
   const interval = billingInterval === 'month' ? 'per month' : 'per year';
+  const intervalUnit = billingInterval === 'month' ? 'month' : 'year';
   
   return {
-    merchantId: process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID || 'merchant.com.mrktfy',
     merchantCountryCode: 'GB',
     currencyCode: 'GBP',
-    paymentSummaryItems: [
+    cartItems: [
       {
+        paymentType: 'Recurring',
+        intervalUnit,
+        intervalCount: 1,
+        startDate: Math.floor(Date.now() / 1000),
         label: `${tier?.name} (${interval})`,
         amount: amount,
       },

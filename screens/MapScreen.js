@@ -44,6 +44,14 @@ const PIN_COLORS = {
 
 const prettyType = (t) => (t === TYPE_RENT ? 'RENTAL' : 'FOR SALE');
 
+const getStatusTag = (listing) => {
+  const status = listing?.Status ?? listing?.status;
+  if (typeof status !== 'string') return null;
+
+  const trimmed = status.trim();
+  return trimmed.length ? trimmed : null;
+};
+
 export default function MapScreen() {
   const [userLocation, setUserLocation] = useState(null);
   const [listings, setListings] = useState([]);
@@ -441,20 +449,31 @@ export default function MapScreen() {
             <Text style={{ fontSize: 18 }}>✕</Text>
           </TouchableOpacity>
 
-          {/* Rental/Sale label */}
-          <View style={{ position: 'absolute', top: 8, left: 8 }}>
-            <Text
-              style={{
-                fontSize: 12, fontWeight: '700', paddingHorizontal: 8, paddingVertical: 4,
-                borderRadius: 10, overflow: 'hidden',
-                backgroundColor:
-                  (selectedListing.ListingType || (isRental ? TYPE_RENT : TYPE_SALE)).toString().toLowerCase() === TYPE_RENT
-                    ? '#b7f397'
-                    : '#e6e6e6',
-              }}
+          <View style={styles.cardBadgeRow}>
+            <View
+              style={[
+                styles.listingTypeBadge,
+                {
+                  backgroundColor:
+                    (selectedListing.ListingType || (isRental ? TYPE_RENT : TYPE_SALE)).toString().toLowerCase() === TYPE_RENT
+                      ? '#b7f397'
+                      : '#e6e6e6',
+                },
+              ]}
             >
-              {prettyType((selectedListing.ListingType || (isRental ? TYPE_RENT : TYPE_SALE)).toString().toLowerCase())}
-            </Text>
+              <Text style={styles.listingTypeBadgeText}>
+                {prettyType((selectedListing.ListingType || (isRental ? TYPE_RENT : TYPE_SALE)).toString().toLowerCase())}
+              </Text>
+            </View>
+
+            {(() => {
+              const statusTag = getStatusTag(selectedListing);
+              return statusTag ? (
+                <View style={styles.statusBadge}>
+                  <Text style={styles.statusBadgeText}>{statusTag}</Text>
+                </View>
+              ) : null;
+            })()}
           </View>
 
           <ScrollView
@@ -679,6 +698,37 @@ const styles = StyleSheet.create({
     backgroundColor: 'white', borderRadius: 12, padding: 12, elevation: 5,
     zIndex: 30,
   },
+  cardBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    paddingRight: 36,
+    marginBottom: 8,
+  },
+  listingTypeBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  listingTypeBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFD84D',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  statusBadgeText: {
+    color: '#2f2500',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   imageRow: { flexDirection: 'row', marginBottom: 8 },
   image: { width: 100, height: 80, marginRight: 8, borderRadius: 8 },
   cardTitle: { fontSize: 16, fontWeight: 'bold' },
@@ -723,4 +773,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   }
 })
-

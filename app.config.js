@@ -81,5 +81,8 @@ plugins: [
     APP_ENV: process.env.EXPO_PUBLIC_APP_ENV ?? process.env.APP_ENV ?? "production",
     GOOGLE_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? "",
     APPLE_CLIENT_ID: process.env.EXPO_PUBLIC_APPLE_CLIENT_ID ?? "com.mrktfy.mrktfy",
+    STRIPE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "",
+    APPLE_MERCHANT_ID: process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID ?? "",
+    ENABLE_APPLE_PAY: process.env.EXPO_PUBLIC_ENABLE_APPLE_PAY === "true",
   }
 });

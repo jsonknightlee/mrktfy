@@ -87,6 +87,14 @@ const headingFromLocation = (headingData) => {
   return null;
 };
 
+const getStatusTag = (listing) => {
+  const status = listing?.Status ?? listing?.status;
+  if (typeof status !== 'string') return null;
+
+  const trimmed = status.trim();
+  return trimmed.length ? trimmed : null;
+};
+
 export default function ARScreen() {
   const navigation = useNavigation();
   const [permission, requestPermission] = useCameraPermissions();
@@ -125,6 +133,7 @@ export default function ARScreen() {
       Latitude: l.latitude ?? l.Latitude,
       Longitude: l.longitude ?? l.Longitude,
       ListingType: (l.listingType ?? l.ListingType ?? '').toString().toLowerCase(),
+      Status: l.status ?? l.Status,
       ImageUrls: imgs,
       Beds: l.beds ?? l.Beds,
       Baths: l.baths ?? l.Baths,
@@ -253,6 +262,7 @@ export default function ARScreen() {
 
   const instantBeds = instant?.beds ?? instant?.Beds;
   const instantPrice = instant?.price ?? instant?.Price ?? instant?.rent ?? instant?.listPrice ?? instant?.ListPrice;
+  const instantStatus = getStatusTag(instant);
 
   return (
     <View style={{ flex: 1 }}>
@@ -269,6 +279,12 @@ export default function ARScreen() {
             style={styles.instantCard}
             onPress={() => navigation.navigate('ListingDetail', { listing: normalizeForDetail(instant) })}
           >
+            {instantStatus ? (
+              <View style={styles.instantStatusBadge}>
+                <Text style={styles.instantStatusBadgeText}>{instantStatus}</Text>
+              </View>
+            ) : null}
+
             <Text style={styles.instantTitle} numberOfLines={1}>
               {instantTitle}
             </Text>
@@ -325,6 +341,19 @@ const styles = StyleSheet.create({
   instantTitle: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '800',
+  },
+  instantStatusBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFD84D',
+    borderRadius: 12,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  instantStatusBadgeText: {
+    color: '#2f2500',
+    fontSize: 12,
     fontWeight: '800',
   },
   instantMeta: {

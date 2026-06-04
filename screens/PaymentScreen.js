@@ -16,15 +16,42 @@ import { processSubscriptionPayment, confirmSubscriptionPayment } from '../servi
 export default function PaymentScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { tier, billingInterval = 'month' } = route.params || {};
-  const { updateSubscription } = useSubscription();
+  const { updateSubscription, userProfile } = useSubscription();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [stripeIntentId, setStripeIntentId] = useState(null);
 
   const { initializePaymentSheet, openPaymentSheet, loading: sheetLoading } = useStripePaymentSheet();
 
   const price = tier?.prices?.[billingInterval];
   const isTrial = tier?.trial?.enabled;
   const trialDuration = tier?.trial?.durationDays;
+
+  const completeSubscriptionFlow = async (intentId = stripeIntentId) => {
+    await updateSubscription(tier.key);
+
+    if (intentId) {
+      const confirmation = await confirmSubscriptionPayment(intentId, tier.key, billingInterval);
+      if (!confirmation.success) {
+        console.warn('Subscription confirmation failed after Stripe success:', confirmation.error);
+      }
+    }
+
+    const successMessage = isTrial
+      ? `You've successfully started your ${trialDuration}-day free trial of ${tier.name}!`
+      : `You've successfully subscribed to ${tier.name}!`;
+
+    Alert.alert(
+      isTrial ? 'Trial Started!' : 'Payment Successful!',
+      successMessage,
+      [
+        {
+          text: 'OK',
+          onPress: () => navigation.navigate('Tabs', { screen: 'Map' }),
+        },
+      ]
+    );
+  };
 
   // Initialize payment sheet when component mounts
   useEffect(() => {
@@ -34,12 +61,11 @@ export default function PaymentScreen({ route, navigation }) {
   const initializePayment = async () => {
     setIsProcessing(true);
     try {
-      // Get user info (you might get this from AuthContext)
-      const userEmail = 'user@example.com'; // Replace with actual user email
-      const userName = 'Mrktfy User'; // Replace with actual user name
+      const userEmail = userProfile?.email || userProfile?.Email || 'customer@mrktfy.app';
+      const userName = userProfile?.name || userProfile?.Name || userProfile?.fullName || 'Mrktfy User';
 
       // Process subscription payment
-      const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName);
+      const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName, userProfile);
 
       if (!paymentResult.success) {
         throw new Error(paymentResult.error);
@@ -47,13 +73,17 @@ export default function PaymentScreen({ route, navigation }) {
 
       // Create Apple Pay configuration
       const applePayConfig = createApplePayConfig(tier, billingInterval);
+      const intentId = paymentResult.paymentIntentId || paymentResult.setupIntentId || paymentResult.subscriptionId || null;
+      setStripeIntentId(intentId);
 
       // Initialize payment sheet with the payment intent and Apple Pay config
       const { success } = await initializePaymentSheet({
         paymentIntent: paymentResult.paymentIntent,
+        setupIntent: paymentResult.setupIntent,
         ephemeralKey: paymentResult.ephemeralKey,
         customer: paymentResult.customer,
         applePayConfig,
+        primaryButtonLabel: isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}`,
       });
 
       if (success) {
@@ -63,7 +93,7 @@ export default function PaymentScreen({ route, navigation }) {
       }
     } catch (error) {
       console.error('Payment initialization error:', error);
-      Alert.alert('Error', 'Failed to initialize payment. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to initialize payment. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -81,26 +111,7 @@ export default function PaymentScreen({ route, navigation }) {
         return;
       }
 
-      // Payment successful - update subscription
-      await updateSubscription(tier.key);
-
-      // Confirm payment with backend (optional, for webhooks)
-      // await confirmSubscriptionPayment(paymentIntentId, tier.key, billingInterval);
-
-      const successMessage = isTrial
-        ? `You've successfully started your ${trialDuration}-day free trial of ${tier.name}!`
-        : `You've successfully subscribed to ${tier.name}!`;
-
-      Alert.alert(
-        isTrial ? 'Trial Started!' : 'Payment Successful!',
-        successMessage,
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.navigate('Tabs', { screen: 'Map' }),
-          },
-        ]
-      );
+      await completeSubscriptionFlow();
     } catch (error) {
       Alert.alert('Payment Failed', error.message);
     } finally {

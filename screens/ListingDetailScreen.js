@@ -26,6 +26,13 @@ import AdModal from '../components/AdModal';
 const { width } = Dimensions.get('window');
 const MODAL_HEIGHT = Dimensions.get("window").height * 0.9;
 
+const getStatusTag = (listing) => {
+  const status = listing?.Status ?? listing?.status;
+  if (typeof status !== 'string') return null;
+
+  const trimmed = status.trim();
+  return trimmed.length ? trimmed : null;
+};
 
 export default function ListingDetailScreen({ route, navigation }) {
   const { listing } = route.params;
@@ -219,6 +226,14 @@ useEffect(() => {
         <Text style={styles.price}>
           {typeof listing.Price === 'number' ? listing.Price.toLocaleString() : String(listing.Price || '')}
         </Text>
+        {(() => {
+          const statusTag = getStatusTag(listing);
+          return statusTag ? (
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusBadgeText}>{statusTag}</Text>
+            </View>
+          ) : null;
+        })()}
 
         {/* Metadata Row */}
         <View style={styles.metaRow}>
@@ -391,7 +406,21 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   title: { fontSize: 22, fontWeight: '600', marginTop: 16, marginHorizontal: 16 },
-  price: { fontSize: 22, color: '#107AB0', marginHorizontal: 16, marginBottom: 16, marginTop: 8 },
+  price: { fontSize: 22, color: '#107AB0', marginHorizontal: 16, marginBottom: 8, marginTop: 8 },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFD84D',
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusBadgeText: {
+    color: '#2f2500',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   mockDataIndicator: {
     backgroundColor: '#fff3cd',
     marginHorizontal: 16,
