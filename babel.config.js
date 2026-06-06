@@ -9,7 +9,7 @@ module.exports = function (api) {
       //  allowUndefined: true
       //}],
       //['react-native-reanimated/plugin'],
-      ['react-native-worklets/plugin'], // <-- keep ONLY this for Reanimated 4
+      // ['react-native-worklets/plugin'], // <-- removed since RNWorklets was uninstalled
     ],
   };
 };

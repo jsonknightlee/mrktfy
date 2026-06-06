@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 import { databaseService } from '../services/databaseService';
 import { getToken, deleteToken } from '../services/authService';
 import { AuthContext } from './AuthContext';
+import { cancelStripeSubscription } from '../services/paymentService';
 
 // Helper function to get subscription price
 const getSubscriptionPrice = (tierId) => {
@@ -28,78 +29,52 @@ const STORAGE_KEYS = {
   AUTO_RENEW: 'subscription_auto_renew',
 };
 
-// Persistence functions
-const saveSubscriptionState = async (tier, startDate, endDate, isCancelled, trialStartDate = null, trialEndDate = null, isInTrial = false, autoRenew = false) => {
+const defaultSubscriptionState = {
+  tier: 'free',
+  startDate: null,
+  endDate: null,
+  isCancelled: false,
+  trialStartDate: null,
+  trialEndDate: null,
+  isInTrial: false,
+  autoRenew: false,
+};
+
+const clearSubscriptionStorage = async () => {
   try {
-    await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_TIER, tier);
-    await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_START_DATE, startDate || '');
-    await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_END_DATE, endDate || '');
-    await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_IS_CANCELLED, isCancelled.toString());
-    await AsyncStorage.setItem(STORAGE_KEYS.TRIAL_START_DATE, trialStartDate || '');
-    await AsyncStorage.setItem(STORAGE_KEYS.TRIAL_END_DATE, trialEndDate || '');
-    await AsyncStorage.setItem(STORAGE_KEYS.IS_IN_TRIAL, isInTrial.toString());
-    await AsyncStorage.setItem(STORAGE_KEYS.AUTO_RENEW, autoRenew.toString());
-    
-    console.log('💾 Saved subscription state to AsyncStorage:', { 
-      tier, 
-      startDate, 
-      endDate, 
-      isCancelled,
-      trialStartDate,
-      trialEndDate,
-      isInTrial,
-      autoRenew
-    });
+    await AsyncStorage.multiRemove([...Object.values(STORAGE_KEYS), 'user-profile']);
+    console.log('🧹 [SUBSCRIPTION] Cleared subscription AsyncStorage; database is source of truth');
   } catch (error) {
-    console.error('Failed to save subscription state:', error);
+    console.error('Failed to clear subscription AsyncStorage:', error);
   }
+};
+
+// Subscription state is server-authoritative. Keep this helper as a compatibility
+// no-op for existing call sites, but remove any stale cached tier values.
+const saveSubscriptionState = async () => {
+  await clearSubscriptionStorage();
 };
 
 const loadSubscriptionState = async () => {
   try {
-    const tier = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION_TIER);
-    const startDate = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION_START_DATE);
-    const endDate = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION_END_DATE);
-    const isCancelled = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION_IS_CANCELLED);
-    const trialStartDate = await AsyncStorage.getItem(STORAGE_KEYS.TRIAL_START_DATE);
-    const trialEndDate = await AsyncStorage.getItem(STORAGE_KEYS.TRIAL_END_DATE);
-    const isInTrial = await AsyncStorage.getItem(STORAGE_KEYS.IS_IN_TRIAL);
-    const autoRenew = await AsyncStorage.getItem(STORAGE_KEYS.AUTO_RENEW);
-    
-    console.log('📖 Loaded subscription state from AsyncStorage:', { 
-      tier, 
-      startDate, 
-      endDate, 
-      isCancelled,
-      trialStartDate,
-      trialEndDate,
-      isInTrial,
-      autoRenew
-    });
-    
-    return {
-      tier: tier || 'free',
-      startDate: startDate || null,
-      endDate: endDate || null,
-      isCancelled: isCancelled === 'true',
-      trialStartDate: trialStartDate || null,
-      trialEndDate: trialEndDate || null,
-      isInTrial: isInTrial === 'true',
-      autoRenew: autoRenew === 'true',
-    };
+    await clearSubscriptionStorage();
+    console.log('📖 [SUBSCRIPTION] Skipping subscription AsyncStorage load; using database/default state');
+    return defaultSubscriptionState;
   } catch (error) {
     console.error('Failed to load subscription state:', error);
-    return {
-      tier: 'free',
-      startDate: null,
-      endDate: null,
-      isCancelled: false,
-      trialStartDate: null,
-      trialEndDate: null,
-      isInTrial: false,
-      autoRenew: false,
-    };
+    return defaultSubscriptionState;
   }
+};
+
+const isProfileInTrial = (userProfile) => {
+  const explicitTrial = userProfile?.IsInTrial ?? userProfile?.isInTrial;
+  if (explicitTrial != null) return Boolean(explicitTrial);
+
+  const subscriptionStatus = userProfile?.SubscriptionStatus || userProfile?.subscriptionStatus;
+  if (String(subscriptionStatus || '').toLowerCase() === 'trialing') return true;
+
+  const trialEndDate = userProfile?.TrialEndDate || userProfile?.trialEndDate;
+  return trialEndDate ? new Date(trialEndDate) > new Date() : false;
 };
 
 // Check subscription validity and handle expiration
@@ -143,8 +118,7 @@ const checkSubscriptionValidity = async (subscriptionState) => {
         console.error('❌ [SUBSCRIPTION] Failed to update expired subscription in database:', error);
       }
       
-      // Update AsyncStorage to free tier
-      await saveSubscriptionState('free', now.toISOString(), null, false, null, null, false, false);
+      await clearSubscriptionStorage();
       
       // Return updated state
       return {
@@ -314,8 +288,8 @@ const initialState = {
 function subscriptionReducer(state, action) {
   switch (action.type) {
     case SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION:
-      // Don't automatically save to AsyncStorage - we handle it explicitly after database success
-      // This prevents saving when loading from AsyncStorage or during development fallbacks
+      // Subscription state is server-authoritative. Do not persist tier/trial
+      // values locally because Stripe/backend changes must win.
       return {
         ...state,
         currentTier: action.payload.tier,
@@ -329,23 +303,13 @@ function subscriptionReducer(state, action) {
       };
     
     case SUBSCRIPTION_ACTIONS.SET_TRIAL:
-      // Only save if this is a real trial state change (not just resetting to null)
       const hasTrialData = action.payload.trialStartDate && action.payload.trialEndDate;
       
       if (hasTrialData) {
-        // Save trial state to AsyncStorage
-        saveSubscriptionState(
-          state.currentTier,
-          state.subscriptionStartDate,
-          state.subscriptionEndDate,
-          state.isCancelled,
-          action.payload.trialStartDate,
-          action.payload.trialEndDate,
-          action.payload.isInTrial
-        );
-        console.log('💾 [SUBSCRIPTION] Saved trial state to AsyncStorage');
+        clearSubscriptionStorage();
+        console.log('🧹 [SUBSCRIPTION] Cleared local trial cache; database is source of truth');
       } else {
-        console.log('📱 [SUBSCRIPTION] Not saving trial state (resetting to null)');
+        console.log('📱 [SUBSCRIPTION] Trial state reset locally');
       }
       
       return {
@@ -532,7 +496,7 @@ export function SubscriptionProvider({ children }) {
                   isCancelled: !userProfile.IsSubscriptionActive,
                   trialStartDate: userProfile.TrialStartDate || userProfile.trialStartDate || null,
                   trialEndDate: userProfile.TrialEndDate || userProfile.trialEndDate || null,
-                  isInTrial: userProfile.IsInTrial || userProfile.isInTrial || false,
+                  isInTrial: isProfileInTrial(userProfile),
                 };
                 
                 dispatch({
@@ -540,43 +504,13 @@ export function SubscriptionProvider({ children }) {
                   payload: subscriptionData
                 });
                 
-                // Only save to AsyncStorage AFTER database success
-                console.log('💾 [SUBSCRIPTION] Saving subscription state to AsyncStorage after database success');
-                await saveSubscriptionState(
-                  subscriptionData.tier,
-                  subscriptionData.startDate,
-                  subscriptionData.endDate,
-                  subscriptionData.isCancelled,
-                  subscriptionData.trialStartDate,
-                  subscriptionData.trialEndDate,
-                  subscriptionData.isInTrial
-                );
+                await clearSubscriptionStorage();
               } else {
                 console.log('⚠️ [SUBSCRIPTION] User profile has no subscriptionLevelId');
               }
             } else {
-              console.log('👤 [SUBSCRIPTION] No user profile found in database, using AsyncStorage...');
-              const persistedState = await loadSubscriptionState();
-              console.log('📱 [SUBSCRIPTION] Loaded persisted subscription state:', persistedState);
-              
-              // Only update if we have actual subscription data (tier is not null and not 'free')
-              if (persistedState.tier && persistedState.tier !== 'free') {
-                console.log('📱 [SUBSCRIPTION] Found persisted subscription, updating state');
-                dispatch({
-                  type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
-                  payload: {
-                    tier: persistedState.tier,
-                    startDate: persistedState.startDate,
-                    endDate: persistedState.endDate,
-                    isCancelled: persistedState.isCancelled,
-                    trialStartDate: persistedState.trialStartDate,
-                    trialEndDate: persistedState.trialEndDate,
-                    isInTrial: persistedState.isInTrial,
-                  }
-                });
-              } else {
-                console.log('📱 [SUBSCRIPTION] No valid persisted subscription data, staying on initial state');
-              }
+              console.log('👤 [SUBSCRIPTION] No user profile found in database; clearing local subscription cache');
+              await clearSubscriptionStorage();
             }
           } catch (dbError) {
             console.error('❌ [SUBSCRIPTION] Database call error:', dbError);
@@ -587,33 +521,12 @@ export function SubscriptionProvider({ children }) {
             });
           }
         } else {
-          console.log('🔑 [SUBSCRIPTION] User not logged in, using AsyncStorage...');
-          const persistedState = await loadSubscriptionState();
-          console.log('📱 [SUBSCRIPTION] Loaded persisted subscription state:', persistedState);
-          
-          // Check subscription validity (handles expired subscriptions)
-          const validState = await checkSubscriptionValidity(persistedState);
-          console.log('📱 [SUBSCRIPTION] Validated subscription state:', validState);
-          
-          // Only update if we have actual subscription data (tier is not null and not 'free')
-          if (validState.tier && validState.tier !== 'free') {
-            console.log('📱 [SUBSCRIPTION] Found persisted subscription, updating state');
-            dispatch({
-              type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
-              payload: {
-                tier: validState.tier,
-                startDate: validState.startDate,
-                endDate: validState.endDate,
-                isCancelled: validState.isCancelled,
-                trialStartDate: validState.trialStartDate,
-                trialEndDate: validState.trialEndDate,
-                isInTrial: validState.isInTrial,
-                autoRenew: validState.autoRenew,
-              }
-            });
-          } else {
-            console.log('📱 [SUBSCRIPTION] No valid persisted subscription data, staying on initial state');
-          }
+          console.log('🔑 [SUBSCRIPTION] User not logged in; clearing subscription cache and using Free defaults');
+          await clearSubscriptionStorage();
+          dispatch({
+            type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
+            payload: defaultSubscriptionState,
+          });
         }
         
         dispatch({ type: SUBSCRIPTION_ACTIONS.SET_LOADING, payload: false });
@@ -702,7 +615,7 @@ export function SubscriptionProvider({ children }) {
                         isCancelled: !userProfile.IsSubscriptionActive,
                         trialStartDate: userProfile.TrialStartDate || userProfile.trialStartDate || null,
                         trialEndDate: userProfile.TrialEndDate || userProfile.trialEndDate || null,
-                        isInTrial: userProfile.IsInTrial || userProfile.isInTrial || false,
+                        isInTrial: isProfileInTrial(userProfile),
                       };
                       
                       dispatch({
@@ -710,25 +623,7 @@ export function SubscriptionProvider({ children }) {
                         payload: subscriptionData
                       });
                       
-                      // Only save to AsyncStorage AFTER database success
-                      console.log('💾 [SUBSCRIPTION] ===== UPDATING ASYNCSTORAGE =====');
-                      console.log('💾 [SUBSCRIPTION] Saving tier:', subscriptionData.tier);
-                      console.log('💾 [SUBSCRIPTION] Saving startDate:', subscriptionData.startDate);
-                      console.log('💾 [SUBSCRIPTION] Saving endDate:', subscriptionData.endDate);
-                      console.log('💾 [SUBSCRIPTION] Saving isCancelled:', subscriptionData.isCancelled);
-                      console.log('💾 [SUBSCRIPTION] Saving trialStartDate:', subscriptionData.trialStartDate);
-                      console.log('💾 [SUBSCRIPTION] Saving trialEndDate:', subscriptionData.trialEndDate);
-                      console.log('💾 [SUBSCRIPTION] Saving isInTrial:', subscriptionData.isInTrial);
-                      await saveSubscriptionState(
-                        subscriptionData.tier,
-                        subscriptionData.startDate,
-                        subscriptionData.endDate,
-                        subscriptionData.isCancelled,
-                        subscriptionData.trialStartDate,
-                        subscriptionData.trialEndDate,
-                        subscriptionData.isInTrial
-                      );
-                      console.log('💾 [SUBSCRIPTION] ===== ASYNCSTORAGE UPDATED =====');
+                      await clearSubscriptionStorage();
                     } else {
                       console.log('⚠️ [SUBSCRIPTION] Subscription level not found for ID:', subscriptionLevelId);
                     }
@@ -760,24 +655,6 @@ export function SubscriptionProvider({ children }) {
       reloadAfterLogin();
     }
   }, [isLoggedIn]);
-
-  // Save subscription to AsyncStorage whenever it changes
-  useEffect(() => {
-    const saveSubscription = async () => {
-      try {
-        if (state.userProfile) {
-          await AsyncStorage.setItem(
-            'user-profile',
-            JSON.stringify(state.userProfile)
-          );
-        }
-      } catch (error) {
-        console.error('Failed to save user profile:', error);
-      }
-    };
-
-    saveSubscription();
-  }, [state.userProfile]);
 
   // Check trial expiration when app starts or trial state changes
   useEffect(() => {
@@ -972,7 +849,7 @@ export function SubscriptionProvider({ children }) {
                 isCancelled: !userProfile.isSubscriptionActive,
                 trialStartDate: userProfile.trialStartDate || null,
                 trialEndDate: userProfile.trialEndDate || null,
-                isInTrial: userProfile.isInTrial || false,
+                isInTrial: isProfileInTrial(userProfile),
                 autoRenew: userProfile.AutoRenew || false,
               }
             });
@@ -1023,136 +900,49 @@ export function SubscriptionProvider({ children }) {
     },
     cancelSubscription: async () => {
       try {
-        // Get actual user ID from token
-        let userId = 'current-user'; // fallback
+        let userId =
+          state.userProfile?.UserID ||
+          state.userProfile?.userId ||
+          state.userProfile?.UserId ||
+          'current-user';
+
         try {
           const token = await getToken();
           if (token) {
             const tokenPayload = JSON.parse(atob(token.split('.')[1]));
-            userId = tokenPayload.ID || tokenPayload.userId || tokenPayload.sub || 'current-user';
+            userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || userId;
             console.log('🔑 [SUBSCRIPTION] cancelSubscription extracted userId:', userId);
           }
         } catch (tokenError) {
           console.error('❌ [SUBSCRIPTION] Failed to get user ID from token:', tokenError);
         }
-        
-        console.log('🚫 [SUBSCRIPTION] Cancelling subscription for user:', userId);
-        
-        // Get current subscription info before cancellation
-        const currentState = state;
-        const currentEndDate = currentState.endDate;
-        
-        if (process.env.EXPO_PUBLIC_APP_ENV === 'development') {
-          console.log('🔧 Development mode: Using fallback cancellation');
-          
-          // In development, just set cancelled status but keep active until end date
-          const now = new Date();
-          const endDate = currentEndDate || new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000)).toISOString(); // Default 30 days from now
-          
-          console.log('🚫 Setting subscription as cancelled, active until:', endDate);
-          
-          // Update subscription state to cancelled but keep active tier until end date
+
+        const subscriptionId =
+          state.userProfile?.StripeSubscriptionID ||
+          state.userProfile?.stripeSubscriptionId ||
+          null;
+
+        console.log('🚫 [SUBSCRIPTION] Cancelling Stripe subscription:', { userId, subscriptionId });
+
+        const result = await cancelStripeSubscription({
+          userId,
+          subscriptionId,
+          cancelAtPeriodEnd: true,
+        });
+
+        if (!result.success) {
           dispatch({
-            type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
-            payload: {
-              tier: currentState.currentTier,
-              startDate: currentState.startDate,
-              endDate: endDate,
-              isCancelled: true,
-              trialStartDate: currentState.trialStartDate,
-              trialEndDate: currentState.trialEndDate,
-              isInTrial: currentState.isInTrial,
-              autoRenew: false,
-            }
-          });
-          
-          // Save to AsyncStorage with autoRenew: false
-          await saveSubscriptionState(
-            currentState.currentTier,
-            currentState.startDate,
-            endDate,
-            true,
-            currentState.trialStartDate,
-            currentState.trialEndDate,
-            currentState.isInTrial,
-            false
-          );
-          
-          console.log('🚫 Development mode: Subscription cancelled, auto-renew disabled');
-          return true;
-        }
-        
-        // Production mode - update database with cancellation
-        try {
-          console.log('🔗 Production mode: Updating database for cancellation');
-          
-          // Update database to set autoRenew: false and isCancelled: true
-          await databaseService.updateUserSubscription({
-            SubscriptionLevelID: currentState.currentTier,
-            SubscriptionStartDate: currentState.startDate,
-            SubscriptionEndDate: currentEndDate,
-            IsSubscriptionActive: true, // Still active until end date
-            IsCancelled: true,
-            AutoRenew: false
-          });
-          
-          console.log('✅ Database cancellation update succeeded');
-          
-          // Send cancellation confirmation email
-          try {
-            const { sendCancellationConfirmation } = require('./services/emailService');
-            await sendCancellationConfirmation(
-              {
-                SubscriptionLevelID: currentState.currentTier,
-                SubscriptionEndDate: currentEndDate,
-                AutoRenew: false
-              },
-              currentState.userProfile
-            );
-          } catch (emailError) {
-            console.error('❌ Failed to send cancellation email:', emailError);
-            // Don't fail the cancellation if email fails
-          }
-          
-          // Update local state
-          dispatch({
-            type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
-            payload: {
-              tier: currentState.currentTier,
-              startDate: currentState.startDate,
-              endDate: currentEndDate,
-              isCancelled: true,
-              trialStartDate: currentState.trialStartDate,
-              trialEndDate: currentState.trialEndDate,
-              isInTrial: currentState.isInTrial,
-              autoRenew: false,
-            }
-          });
-          
-          // Save to AsyncStorage
-          await saveSubscriptionState(
-            currentState.currentTier,
-            currentState.startDate,
-            currentEndDate,
-            true,
-            currentState.trialStartDate,
-            currentState.trialEndDate,
-            currentState.isInTrial,
-            false
-          );
-          
-          console.log('🚫 Production mode: Subscription cancelled successfully');
-          return true;
-          
-        } catch (dbError) {
-          console.error('❌ Database cancellation failed:', dbError);
-          dispatch({ 
-            type: SUBSCRIPTION_ACTIONS.SET_ERROR, 
-            payload: 'Failed to cancel subscription in database' 
+            type: SUBSCRIPTION_ACTIONS.SET_ERROR,
+            payload: result.error || 'Failed to cancel subscription',
           });
           return false;
         }
-        
+
+        await clearSubscriptionStorage();
+        await value.reloadSubscriptionData();
+
+        console.log('🚫 [SUBSCRIPTION] Stripe cancellation completed');
+        return true;
       } catch (error) {
         console.error('❌ Cancel subscription error:', error);
         dispatch({ 
@@ -1435,7 +1225,17 @@ export function SubscriptionProvider({ children }) {
             console.log('🔄 [RELOAD] User profile data:', userProfile ? JSON.stringify(userProfile, null, 2) : 'No data');
             
             if (userProfile) {
-              console.log('🔄 [RELOAD] Loaded user profile from database:', userProfile.subscriptionLevelId);
+              const subscriptionLevelId = userProfile.SubscriptionLevelID || userProfile.subscriptionLevelId;
+              const subscriptionStatus = userProfile.SubscriptionStatus || userProfile.subscriptionStatus;
+              const trialStartDate = userProfile.TrialStartDate || userProfile.trialStartDate || null;
+              const trialEndDate = userProfile.TrialEndDate || userProfile.trialEndDate || null;
+              const isSubscriptionActive =
+                userProfile.IsSubscriptionActive ?? userProfile.isSubscriptionActive ?? false;
+              const isTrialingByStatus = String(subscriptionStatus || '').toLowerCase() === 'trialing';
+              const isTrialingByDate = trialEndDate ? new Date(trialEndDate) > new Date() : false;
+              const isInTrial = Boolean(userProfile.IsInTrial ?? userProfile.isInTrial ?? (isTrialingByStatus || isTrialingByDate));
+
+              console.log('🔄 [RELOAD] Loaded user profile from database:', subscriptionLevelId);
               
               // Update user profile
               dispatch({ 
@@ -1444,20 +1244,25 @@ export function SubscriptionProvider({ children }) {
               });
               
               // Update subscription tier based on database data (this overrides AsyncStorage)
-              if (userProfile.subscriptionLevelId) {
-                console.log('🔄 [RELOAD] Updating subscription tier from database (overriding AsyncStorage):', userProfile.subscriptionLevelId);
+              if (subscriptionLevelId) {
+                const subscriptionData = {
+                  tier: String(subscriptionLevelId).toLowerCase(),
+                  startDate: userProfile.SubscriptionStartDate || userProfile.subscriptionStartDate || new Date().toISOString(),
+                  endDate: userProfile.SubscriptionEndDate || userProfile.subscriptionEndDate || null,
+                  isCancelled: !isSubscriptionActive,
+                  trialStartDate,
+                  trialEndDate,
+                  isInTrial,
+                  autoRenew: isSubscriptionActive,
+                };
+
+                console.log('🔄 [RELOAD] Updating subscription tier from database (overriding AsyncStorage):', subscriptionData);
                 dispatch({
                   type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
-                  payload: {
-                    tier: userProfile.subscriptionLevelId,
-                    startDate: userProfile.subscriptionStartDate || new Date().toISOString(),
-                    endDate: userProfile.subscriptionEndDate || null,
-                    isCancelled: !userProfile.isSubscriptionActive,
-                    trialStartDate: userProfile.trialStartDate || null,
-                    trialEndDate: userProfile.trialEndDate || null,
-                    isInTrial: userProfile.isInTrial || false,
-                  }
+                  payload: subscriptionData
                 });
+
+                await clearSubscriptionStorage();
               } else {
                 console.log('⚠️ [RELOAD] User profile has no subscriptionLevelId');
               }
@@ -1473,28 +1278,12 @@ export function SubscriptionProvider({ children }) {
             });
           }
         } else {
-          console.log('🔄 [RELOAD] No token found, using AsyncStorage...');
-          // Load from AsyncStorage if no user is logged in
-          const persistedState = await loadSubscriptionState();
-          console.log('🔄 [RELOAD] Loaded persisted subscription state:', persistedState);
-          
-          // Only update if we have actual subscription data (tier is not null and not 'free')
-          if (persistedState.tier && persistedState.tier !== 'free') {
-            dispatch({
-              type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
-              payload: {
-                tier: persistedState.tier,
-                startDate: persistedState.startDate,
-                endDate: persistedState.endDate,
-                isCancelled: persistedState.isCancelled,
-                trialStartDate: persistedState.trialStartDate,
-                trialEndDate: persistedState.trialEndDate,
-                isInTrial: persistedState.isInTrial,
-              }
-            });
-          } else {
-            console.log('🔄 [RELOAD] No valid persisted subscription data, staying on initial state');
-          }
+          console.log('🔄 [RELOAD] No token found; clearing cached subscription data and using default Free state');
+          await clearSubscriptionStorage();
+          dispatch({
+            type: SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION,
+            payload: defaultSubscriptionState,
+          });
         }
         
         console.log('🔄 [RELOAD] reloadSubscriptionData: Completed');
@@ -1510,6 +1299,19 @@ export function SubscriptionProvider({ children }) {
       }
     },
   };
+
+  useEffect(() => {
+    if (isLoggedIn !== true) return undefined;
+
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        console.log('🔄 [SUBSCRIPTION] App became active; refreshing subscription from database');
+        value.reloadSubscriptionData();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [isLoggedIn]);
 
   return (
     <SubscriptionContext.Provider value={value}>

@@ -1,8 +1,11 @@
 import { getToken } from '../utils/tokenStorage';
+import Constants from 'expo-constants';
+
+const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
 
 const getPaymentConfig = () => ({
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL,
-  apiKey: process.env.EXPO_PUBLIC_API_KEY,
+  apiBaseUrl: extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL,
+  apiKey: extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY,
 });
 
 const buildHeaders = async () => {
@@ -55,6 +58,8 @@ const requestPaymentJson = async (path, body) => {
   if (!apiBaseUrl) {
     throw new Error('EXPO_PUBLIC_API_BASE_URL is not configured');
   }
+
+  console.log('💳 [STRIPE] Backend request:', `${apiBaseUrl}${path}`);
 
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: 'POST',
@@ -260,4 +265,23 @@ export const confirmSubscriptionPayment = async (paymentIntentId, tier, billingI
     success: true,
     data: { paymentIntentId, tier, billingInterval, handledByWebhook: true },
   };
+};
+
+export const cancelStripeSubscription = async ({
+  userId,
+  subscriptionId,
+  cancelAtPeriodEnd = true,
+} = {}) => {
+  try {
+    const data = await requestPaymentJson('/api/stripe/cancel-subscription', {
+      userId: toNonEmptyString(userId),
+      subscriptionId: toNonEmptyString(subscriptionId),
+      cancelAtPeriodEnd,
+    });
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('❌ Stripe subscription cancellation error:', error);
+    return { success: false, error: error.message };
+  }
 };

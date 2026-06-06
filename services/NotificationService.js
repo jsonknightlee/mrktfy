@@ -4,11 +4,17 @@ import { Platform } from 'react-native';
 class NotificationService {
   constructor() {
     this.isInitialized = false;
+    this.notificationReceivedSubscription = null;
+    this.notificationResponseSubscription = null;
   }
 
   // Initialize notification service
   async initialize() {
     try {
+      if (this.isInitialized) {
+        return true;
+      }
+
       // Configure notification handler
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
@@ -176,8 +182,16 @@ class NotificationService {
 
   // Setup notification listeners
   setupListeners(onNotificationReceived, onNotificationResponse) {
+    if (this.notificationReceivedSubscription) {
+      this.notificationReceivedSubscription.remove();
+    }
+
+    if (this.notificationResponseSubscription) {
+      this.notificationResponseSubscription.remove();
+    }
+
     // Listener for when notification is received while app is foregrounded
-    Notifications.addNotificationReceivedListener((notification) => {
+    this.notificationReceivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
       console.log('📨 Notification received in foreground:', notification);
       if (onNotificationReceived) {
         onNotificationReceived(notification);
@@ -185,7 +199,7 @@ class NotificationService {
     });
 
     // Listener for when user interacts with notification
-    Notifications.addNotificationResponseReceivedListener((response) => {
+    this.notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
       console.log('👆 Notification response received:', response);
       if (onNotificationResponse) {
         onNotificationResponse(response);

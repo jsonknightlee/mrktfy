@@ -1,6 +1,7 @@
 // screens/ProfileScreen.js
 import React, { useContext, useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, FlatList, Image, ScrollView, TextInput, Switch } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { getToken, deleteToken } from '../utils/tokenStorage';
 import { fetchUserProfile } from '../services/authApi';
@@ -9,6 +10,9 @@ import { getFavorites, getHistory } from '../services/activityApi';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { databaseService } from '../services/databaseService';
+import NotificationService from '../services/NotificationService';
+
+const NOTIFICATIONS_OPT_IN_KEY = 'mrktfy_notifications_enabled';
 
 // Minimal helper: safely get the first image URL from ImageUrls/ imageUrl (array/JSON/delimited/string)
 const getFirstImageUrl = (val) => {
@@ -56,6 +60,9 @@ export default function ProfileScreen({ navigation }) {
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [favorites, setFavorites] = useState([]);
   const [history, setHistory] = useState([]);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState(null);
+  const [savingNotificationPreference, setSavingNotificationPreference] = useState(false);
 
   // Edit mode for profile
   const [editMode, setEditMode] = useState(false);
@@ -95,6 +102,22 @@ export default function ProfileScreen({ navigation }) {
       }
     })();
   }, [setIsLoggedIn]);
+
+  useEffect(() => {
+    const loadNotificationPreference = async () => {
+      const enabled = await AsyncStorage.getItem(NOTIFICATIONS_OPT_IN_KEY);
+      const permissions = await NotificationService.getPermissions();
+
+      setNotificationsEnabled(enabled === 'true' && permissions.granted);
+      setNotificationPermission(permissions);
+
+      if (enabled === 'true' && !permissions.granted) {
+        await AsyncStorage.setItem(NOTIFICATIONS_OPT_IN_KEY, 'false');
+      }
+    };
+
+    loadNotificationPreference();
+  }, []);
 
   // Initialize edit form when user profile loads
   useEffect(() => {
@@ -176,6 +199,54 @@ export default function ProfileScreen({ navigation }) {
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to update profile.');
+    }
+  };
+
+  const onToggleNotifications = async (enabled) => {
+    if (savingNotificationPreference) return;
+    setSavingNotificationPreference(true);
+
+    try {
+      if (!enabled) {
+        await AsyncStorage.setItem(NOTIFICATIONS_OPT_IN_KEY, 'false');
+        setNotificationsEnabled(false);
+        const permissions = await NotificationService.getPermissions();
+        setNotificationPermission(permissions);
+        return;
+      }
+
+      const initialized = await NotificationService.initialize();
+      const permissions = await NotificationService.getPermissions();
+      setNotificationPermission(permissions);
+
+      if (!initialized || !permissions.granted) {
+        await AsyncStorage.setItem(NOTIFICATIONS_OPT_IN_KEY, 'false');
+        setNotificationsEnabled(false);
+        Alert.alert(
+          'Notifications not enabled',
+          permissions.canAskAgain
+            ? 'Notification permission was not granted.'
+            : 'Enable notifications for Mrktfy in iOS Settings to receive property alerts.'
+        );
+        return;
+      }
+
+      await AsyncStorage.setItem(NOTIFICATIONS_OPT_IN_KEY, 'true');
+      setNotificationsEnabled(true);
+      NotificationService.setupListeners(
+        (notification) => {
+          console.log('📨 Notification received:', notification?.request?.content?.title);
+        },
+        (response) => {
+          console.log('👆 Notification opened:', response?.notification?.request?.content?.data);
+        }
+      );
+      Alert.alert('Notifications enabled', 'Property alerts are now enabled for this device.');
+    } catch (error) {
+      console.error('Failed to update notification preference:', error);
+      Alert.alert('Error', 'Could not update notification settings.');
+    } finally {
+      setSavingNotificationPreference(false);
     }
   };
 
@@ -396,7 +467,22 @@ export default function ProfileScreen({ navigation }) {
       ) : tab === 'settings' ? (
         <View style={styles.settingsPane}>
           <Text style={styles.title}>Settings</Text>
-          <Text style={styles.label}>Settings coming soon...</Text>
+          <View style={styles.settingCard}>
+            <View style={styles.settingTextWrap}>
+              <Text style={styles.settingTitle}>Property notifications</Text>
+              <Text style={styles.settingDescription}>
+                Receive property alerts on this device. Location and saved-search alerts can build on this later.
+              </Text>
+              {notificationPermission?.status ? (
+                <Text style={styles.settingMeta}>Permission: {notificationPermission.status}</Text>
+              ) : null}
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={onToggleNotifications}
+              disabled={savingNotificationPreference}
+            />
+          </View>
         </View>
       ) : (
         <View style={styles.activityPane}>
@@ -585,6 +671,37 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16
+  },
+  settingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+    marginTop: 12,
+  },
+  settingTextWrap: {
+    flex: 1,
+    paddingRight: 14,
+  },
+  settingTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+  },
+  settingMeta: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 6,
   },
 
   // Activity List

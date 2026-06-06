@@ -178,16 +178,20 @@ const planConfig = {
 
 export default function SubscriptionScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { currentTier } = useSubscription();
+  const { currentTier, cancelSubscription, reloadSubscriptionData } = useSubscription();
   const [selectedTier, setSelectedTier] = useState(null);
   const [billingInterval, setBillingInterval] = useState(planConfig.defaultInterval);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const normalizedCurrentTier = String(currentTier || 'free').toLowerCase();
 
   // Update plan CTAs based on actual current tier
   const plansWithCTA = planConfig.plans.map(plan => ({
     ...plan,
     cta: {
-      type: plan.key === currentTier ? 'current_plan' : 'subscribe',
-      label: plan.key === currentTier ? 'Current plan' : plan.trial?.enabled ? 'Start trial' : 'Subscribe'
+      type: String(plan.key).toLowerCase() === normalizedCurrentTier ? 'current_plan' : 'subscribe',
+      label: String(plan.key).toLowerCase() === normalizedCurrentTier
+        ? String(plan.key).toLowerCase() === 'free' ? 'Current plan' : 'Cancel subscription'
+        : plan.trial?.enabled ? 'Start trial' : 'Subscribe'
     }
   }));
 
@@ -202,6 +206,13 @@ export default function SubscriptionScreen({ navigation }) {
   const handleSubscribe = (tier) => {
     if (!tier.isAvailable) {
       Alert.alert('Coming Soon', `${tier.name} plan will be available soon!`);
+      return;
+    }
+
+    if (String(tier.key).toLowerCase() === normalizedCurrentTier) {
+      if (normalizedCurrentTier !== 'free') {
+        handleCancelSubscription(tier);
+      }
       return;
     }
 
@@ -244,9 +255,41 @@ export default function SubscriptionScreen({ navigation }) {
     );
   };
 
+  const handleCancelSubscription = (tier) => {
+    Alert.alert(
+      'Cancel subscription',
+      `Cancel your ${tier.name} subscription at the end of the current billing period?`,
+      [
+        { text: 'Keep subscription', style: 'cancel' },
+        {
+          text: 'Cancel subscription',
+          style: 'destructive',
+          onPress: async () => {
+            setIsCancelling(true);
+            try {
+              const success = await cancelSubscription();
+              if (success) {
+                await reloadSubscriptionData();
+                Alert.alert('Subscription cancelled', 'Your subscription has been updated.');
+              } else {
+                Alert.alert('Cancellation failed', 'Please try again.');
+              }
+            } finally {
+              setIsCancelling(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderTierCard = (tier) => {
     const price = tier.prices[billingInterval];
     const isComingSoon = !tier.isAvailable;
+    const isCurrentPlan = String(tier.key).toLowerCase() === normalizedCurrentTier;
+    const isCurrentFreePlan = isCurrentPlan && normalizedCurrentTier === 'free';
+    const isCurrentPaidPlan = isCurrentPlan && normalizedCurrentTier !== 'free';
+    const isDisabled = isComingSoon || isCurrentFreePlan || isCancelling;
     
     return (
       <View
@@ -316,16 +359,19 @@ export default function SubscriptionScreen({ navigation }) {
         <TouchableOpacity
           style={[
             styles.subscribeButton,
+            isCurrentFreePlan && styles.currentPlanButton,
+            isCurrentPaidPlan && styles.cancelSubscriptionButton,
             { 
-              backgroundColor: isComingSoon ? '#ccc' : tier.key === 'free' ? '#666' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1',
-              opacity: isComingSoon ? 0.6 : 1
+              backgroundColor: isCurrentPaidPlan ? '#dc2626' : isDisabled ? '#d1d5db' : tier.key === 'free' ? '#666' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1',
+              opacity: isDisabled ? 0.75 : 1
             }
           ]}
           onPress={() => handleSubscribe(tier)}
-          disabled={isComingSoon}
+          disabled={isDisabled}
+          accessibilityState={{ disabled: isDisabled }}
         >
-          <Text style={styles.subscribeButtonText}>
-            {isComingSoon ? tier.cta.label : tier.cta.label}
+          <Text style={[styles.subscribeButtonText, isCurrentFreePlan && styles.currentPlanButtonText]}>
+            {isCancelling && isCurrentPaidPlan ? 'Cancelling...' : tier.cta.label}
           </Text>
         </TouchableOpacity>
       </View>
@@ -593,11 +639,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  currentPlanButton: {
+    borderWidth: 1,
+    borderColor: '#9ca3af',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  cancelSubscriptionButton: {
+    shadowColor: '#991b1b',
+  },
   subscribeButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.3,
+  },
+  currentPlanButtonText: {
+    color: '#374151',
   },
   bottomContainer: {
     padding: 20,

@@ -41,9 +41,6 @@ target 'mrktfy' do
 
   config = use_native_modules!(config_command)
 
-  # ✅ Fix for RNReanimated -> RNWorklets pod resolution
-  pod 'RNWorklets', :path => '../node_modules/react-native-worklets'
-
   use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
   use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
 
@@ -62,5 +59,16 @@ target 'mrktfy' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+    
+    # ✅ RNWorklets header search path fix
+    installer.pods_project.targets.each do |t|
+      next unless t.name == 'RNWorklets'
+      t.build_configurations.each do |config|
+        config.build_settings['HEADER_SEARCH_PATHS'] ||= '$(inherited)'
+        # Add the folder that contains rnworklets/rnworklets.h
+        config.build_settings['HEADER_SEARCH_PATHS'] << ' "$(SRCROOT)/../node_modules/react-native-worklets/apple"'
+        config.build_settings['HEADER_SEARCH_PATHS'] << ' "$(SRCROOT)/../node_modules/react-native-worklets"'
+      end
+    end
   end
 end

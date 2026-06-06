@@ -5,7 +5,7 @@ const path = require("path");
 module.exports = function withRNWorkletsPod(config) {
   return withDangerousMod(config, [
     "ios",
-    async (config) => {ß
+    async (config) => {
       const podfilePath = path.join(config.modRequest.platformProjectRoot, "Podfile");
       let podfile = fs.readFileSync(podfilePath, "utf8");
 

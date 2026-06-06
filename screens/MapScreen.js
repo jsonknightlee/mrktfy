@@ -36,6 +36,8 @@ const TOAST_DURATION_MS = 20000; // 20s
 
 const TYPE_RENT = 'to-rent';
 const TYPE_SALE = 'for-sale';
+const APP_PURPLE = '#6366F1';
+const VIEWED_PIN_GREY = '#9CA3AF';
 
 const PIN_COLORS = {
   [TYPE_RENT]: '#32CD32',
@@ -113,11 +115,21 @@ export default function MapScreen() {
   const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, loading, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus } = useSubscription();
   const navigation = useNavigation();
 
+  const getListingPinColor = (listing) => {
+    const status = getFavoriteStatus(listing.ID);
+    if (status.isFavorited) return APP_PURPLE;
+    if (status.lastViewedAt) return VIEWED_PIN_GREY;
+
+    return PIN_COLORS[
+      (listing.ListingType || (isRental ? TYPE_RENT : TYPE_SALE)).toString().toLowerCase()
+    ];
+  };
+
   // Get trial status for badge
   const trialStatus = getTrialStatus();
   const subscriptionName = getCurrentSubscriptionLevel()?.name || 'Free';
   const badgeText = trialStatus.isInTrial 
-    ? `${subscriptionName} (${trialStatus.daysRemaining}d)` 
+    ? `${subscriptionName}(${trialStatus.daysRemaining}d)` 
     : subscriptionName;
 
   const priceOptions = useMemo(() => {
@@ -402,11 +414,7 @@ export default function MapScreen() {
               key={listing.ID}
               coordinate={{ latitude: listing.Latitude, longitude: listing.Longitude }}
               title={listing.Title}
-              pinColor={
-                PIN_COLORS[
-                  (listing.ListingType || (isRental ? TYPE_RENT : TYPE_SALE)).toString().toLowerCase()
-                ]
-              }
+              pinColor={getListingPinColor(listing)}
               onPress={async () => {
                 suppressMapPress(500);
 

@@ -1,14 +1,15 @@
-// import { API_BASE_URL, API_KEY } from '../app.config'; // Try direct access instead
 import axios from 'axios';
+import Constants from 'expo-constants';
+import { getToken } from '../utils/tokenStorage';
 
 // Debug environment variables
 console.log('🔧 Environment Debug - process.env.EXPO_PUBLIC_API_BASE_URL:', process.env.EXPO_PUBLIC_API_BASE_URL);
 console.log('🔧 Environment Debug - process.env.EXPO_PUBLIC_API_KEY:', process.env.EXPO_PUBLIC_API_KEY);
 console.log('🔧 Environment Debug - All EXPO_PUBLIC_* vars:', Object.keys(process.env).filter(key => key.startsWith('EXPO_PUBLIC_')));
 
-// Use process.env directly
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.1.74:3001';
-const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e';
+const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
+const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
 
 console.log('🔧 Final API_BASE_URL:', API_BASE_URL);
 console.log('🔧 Final API_KEY:', API_KEY ? 'SET' : 'NOT SET');
@@ -16,9 +17,8 @@ console.log('🔧 Final API_KEY:', API_KEY ? 'SET' : 'NOT SET');
 // Database service for profiles and subscription management
 class DatabaseService {
   constructor() {
-    // Use environment variable first, fallback to localhost for development
-    this.baseURL = API_BASE_URL || 'http://192.168.1.74:3001';
-    this.apiKey = API_KEY || '804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e';
+    this.baseURL = API_BASE_URL;
+    this.apiKey = API_KEY;
     
     console.log('🔧 DatabaseService Constructor - baseURL:', this.baseURL);
     console.log('🔧 DatabaseService Constructor - apiKey:', this.apiKey ? 'SET' : 'NOT SET');
@@ -62,6 +62,7 @@ class DatabaseService {
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
+          ...(options.headers || {}),
         }
       };
       
@@ -145,7 +146,6 @@ class DatabaseService {
     console.log('🗄️ [DB SERVICE] getUserProfile called with userId:', userId);
     
     // Get the JWT token to send in headers
-    const { getToken } = await import('../services/authService');
     const token = await getToken();
     console.log('🗄️ [DB SERVICE] Token obtained:', token ? 'Yes (first 50 chars: ' + token.substring(0, 50) + '...)' : 'No token');
     

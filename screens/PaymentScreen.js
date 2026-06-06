@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,12 @@ import { processSubscriptionPayment, confirmSubscriptionPayment } from '../servi
 export default function PaymentScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { tier, billingInterval = 'month' } = route.params || {};
-  const { updateSubscription, userProfile } = useSubscription();
+  const { reloadSubscriptionData, userProfile } = useSubscription();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [stripeIntentId, setStripeIntentId] = useState(null);
+  const initializationStartedRef = useRef(false);
+  const paymentCompletedRef = useRef(false);
 
   const { initializePaymentSheet, openPaymentSheet, loading: sheetLoading } = useStripePaymentSheet();
 
@@ -28,7 +30,8 @@ export default function PaymentScreen({ route, navigation }) {
   const trialDuration = tier?.trial?.durationDays;
 
   const completeSubscriptionFlow = async (intentId = stripeIntentId) => {
-    await updateSubscription(tier.key);
+    if (paymentCompletedRef.current) return;
+    paymentCompletedRef.current = true;
 
     if (intentId) {
       const confirmation = await confirmSubscriptionPayment(intentId, tier.key, billingInterval);
@@ -36,6 +39,9 @@ export default function PaymentScreen({ route, navigation }) {
         console.warn('Subscription confirmation failed after Stripe success:', confirmation.error);
       }
     }
+
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await reloadSubscriptionData();
 
     const successMessage = isTrial
       ? `You've successfully started your ${trialDuration}-day free trial of ${tier.name}!`
@@ -55,6 +61,8 @@ export default function PaymentScreen({ route, navigation }) {
 
   // Initialize payment sheet when component mounts
   useEffect(() => {
+    if (initializationStartedRef.current) return;
+    initializationStartedRef.current = true;
     initializePayment();
   }, []);
 

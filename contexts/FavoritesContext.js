@@ -8,6 +8,7 @@ const FavoritesContext = createContext({
   setLastViewed: async () => {},
   getFavoriteStatus: () => ({ isFavorited: false }),
   favoriteStatuses: {},
+  activityTick: 0,
   hydrate: async () => {},
 });
 
@@ -15,7 +16,9 @@ const k = (id) => String(id);
 
 export const FavoritesProvider = ({ children }) => {
   const [favoriteStatuses, setFavoriteStatuses] = useState({});
+  const [activityTick, setActivityTick] = useState(0);
   const hydratingRef = useRef(false);
+  const bumpActivity = () => setActivityTick((tick) => tick + 1);
 
   const hydrate = async () => {
     if (hydratingRef.current) return;
@@ -39,12 +42,13 @@ export const FavoritesProvider = ({ children }) => {
           const idKey = k(it.ID ?? it.id);
           next[idKey] = {
             ...(next[idKey] || {}),
-            isFavorited: false, // history explicitly 0
+            isFavorited: next[idKey]?.isFavorited || false,
             ...(it.lastViewedAt ? { lastViewedAt: it.lastViewedAt } : {}),
           };
         }
         return next;
       });
+      bumpActivity();
     } catch (e) {
       console.warn('Favorites hydrate failed:', e?.message);
     } finally {
@@ -73,6 +77,7 @@ export const FavoritesProvider = ({ children }) => {
 
     try {
       await apiSetFavorite(listingId, nextVal);
+      bumpActivity();
     } catch (e) {
       console.warn('toggleFavorite failed:', e?.message);
       // rollback
@@ -95,12 +100,13 @@ export const FavoritesProvider = ({ children }) => {
 
     try {
       await apiMarkViewed(listingId);
+      bumpActivity();
     } catch (e) {
       console.warn('markViewed failed:', e?.message);
     }
   };
 
-  // Back-compat alias: UI-only setter
+  // Back-compat alias used by map/listing screens; persist views to backend.
   const setLastViewed = async (maybeId, timestamp) => {
     const idNum = Number(maybeId);
     if (!Number.isFinite(idNum)) return;
@@ -110,6 +116,13 @@ export const FavoritesProvider = ({ children }) => {
       ...prev,
       [idKey]: { ...(prev[idKey] || {}), lastViewedAt: ts },
     }));
+
+    try {
+      await apiMarkViewed(idNum);
+      bumpActivity();
+    } catch (e) {
+      console.warn('setLastViewed failed:', e?.message);
+    }
   };
 
   const getFavoriteStatus = (listingId) =>
@@ -121,8 +134,9 @@ export const FavoritesProvider = ({ children }) => {
     setLastViewed,
     getFavoriteStatus,
     favoriteStatuses,
+    activityTick,
     hydrate,
-  }), [favoriteStatuses]);
+  }), [favoriteStatuses, activityTick]);
 
   return (
     <FavoritesContext.Provider value={value}>

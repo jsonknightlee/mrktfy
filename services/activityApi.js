@@ -5,6 +5,9 @@ import { api } from './api';
 
 const transformItem = (it) => {
       let imageUrls = []; // Declare imageUrls at the start
+      it.ID = it.ID ?? it.id ?? it.ListingID ?? it.listingId ?? it.RealEstateListingID ?? it.realEstateListingId;
+      it.favoritedAt = it.favoritedAt ?? it.FavoritedAt ?? it.FavoriteCreatedAt ?? it.favoriteCreatedAt;
+      it.lastViewedAt = it.lastViewedAt ?? it.LastViewedAt ?? it.ViewedAt ?? it.viewedAt;
 
       if (typeof it.ImageUrls === 'string') {
         try {
@@ -26,18 +29,23 @@ const transformItem = (it) => {
     
 }
 
+const getItems = (data, key) => {
+  const value = data?.items ?? data?.[key] ?? data?.data ?? data;
+  return Array.isArray(value) ? value : [];
+};
+
 /* ---------------- API ---------------- */
 
 export const getFavorites = async () => {
   const { data } = await api.get('/activity/users/me/favorites');
-  const items = data?.items ?? [];
+  const items = getItems(data, 'favorites');
   //console.log('activityApi: getFavorites items', items);
   return items.map(transformItem);
 };
 
 export const getHistory = async (limit = 30) => {
   const { data } = await api.get('/activity/users/me/history', { params: { limit } });
-  const items = data?.items ?? [];
+  const items = getItems(data, 'history');
   //console.log('activityApi: getHistory items', items);
   return items.map(transformItem);
 };

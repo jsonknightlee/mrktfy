@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MapScreen from '../screens/MapScreen';
 import ARScreen from '../screens/ARScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import PropertyDeckScreen from '../screens/PropertyDeckScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ListingDetailScreen from '../screens/ListingDetailScreen';
@@ -32,6 +33,11 @@ function MainTabs() {
         name="Map"
         component={MapScreen}
         options={{ tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Deck"
+        component={PropertyDeckScreen}
+        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="albums" size={size} color={color} /> }}
       />
       <Tab.Screen
         name="AR"
