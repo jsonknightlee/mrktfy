@@ -55,14 +55,22 @@ const normalizeDetailListing = (rawListing) => {
     ImageUrls: sourceListing.ImageUrls ?? sourceListing.imageUrls ?? sourceListing.imageUrl ?? rawListing?.ImageUrls ?? rawListing?.imageUrls ?? rawListing?.imageUrl,
     PropertyTimeline: sourceListing.PropertyTimeline ?? sourceListing.propertyTimeline ?? rawListing?.PropertyTimeline ?? rawListing?.propertyTimeline,
     AdditionalInfo: sourceListing.AdditionalInfo ?? sourceListing.additionalInfo ?? rawListing?.AdditionalInfo ?? rawListing?.additionalInfo,
-    Schools: sourceListing.Schools ?? sourceListing.NearbySchools ?? sourceListing.nearbySchools ?? rawListing?.Schools ?? rawListing?.NearbySchools ?? rawListing?.nearbySchools,
-    Stations: sourceListing.Stations ?? sourceListing.NearbyStations ?? sourceListing.nearbyStations ?? rawListing?.Stations ?? rawListing?.NearbyStations ?? rawListing?.nearbyStations,
+    Schools: sourceListing.Schools ?? sourceListing.schools ?? sourceListing.NearbySchools ?? sourceListing.nearbySchools ?? sourceListing.nearby_schools ?? rawListing?.Schools ?? rawListing?.schools ?? rawListing?.NearbySchools ?? rawListing?.nearbySchools ?? rawListing?.nearby_schools,
+    Stations: sourceListing.Stations ?? sourceListing.stations ?? sourceListing.NearbyStations ?? sourceListing.nearbyStations ?? sourceListing.nearby_stations ?? rawListing?.Stations ?? rawListing?.stations ?? rawListing?.NearbyStations ?? rawListing?.nearbyStations ?? rawListing?.nearby_stations,
     Latitude: sourceListing.Latitude ?? sourceListing.latitude ?? rawListing?.Latitude ?? rawListing?.latitude,
     Longitude: sourceListing.Longitude ?? sourceListing.longitude ?? rawListing?.Longitude ?? rawListing?.longitude,
     ListingURL: sourceListing.ListingURL ?? sourceListing.listingUrl ?? sourceListing.listingURL ?? rawListing?.ListingURL ?? rawListing?.listingUrl ?? rawListing?.listingURL,
     AgentPhone: sourceListing.AgentPhone ?? sourceListing.agentPhone ?? rawListing?.AgentPhone ?? rawListing?.agentPhone,
     AgentEmail: sourceListing.AgentEmail ?? sourceListing.agentEmail ?? rawListing?.AgentEmail ?? rawListing?.agentEmail,
   };
+};
+
+const hasInfoData = (value) => {
+  if (!value) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return false;
 };
 
 export default function ListingDetailScreen({ route, navigation }) {
@@ -78,10 +86,13 @@ export default function ListingDetailScreen({ route, navigation }) {
   const additionalInfo = listing.AdditionalInfo;
 
   // Defensive checks to ensure data is valid
-  const safeTimeline = timeline && (typeof timeline === 'string' || Array.isArray(timeline)) ? timeline : null;
-  const safeSchools = schools && Array.isArray(schools) ? schools : null;
-  const safeStations = stations && Array.isArray(stations) ? stations : null;
-  const safeAdditionalInfo = additionalInfo && (typeof additionalInfo === 'string' || typeof additionalInfo === 'object') ? additionalInfo : null;
+  const safeTimeline = timeline ? (typeof timeline === 'string' || Array.isArray(timeline) ? timeline : null) : null;
+  const safeSchools = hasInfoData(schools) ? schools : null;
+  const safeStations = hasInfoData(stations) ? stations : null;
+  const safeAdditionalInfo = hasInfoData(additionalInfo) ? additionalInfo : null;
+  const hasVirtualTours = Number(listing.VirtualTours) > 0;
+  const hasFloorPlans = Number(listing.FloorPlans) > 0;
+  const hasTimeline = Boolean(safeTimeline ? (typeof safeTimeline === 'string' || safeTimeline.length > 0) : false);
 
   const [virtualTourModalVisible, setVirtualTourModalVisible] = useState(false);
   const [floorPlanModalVisible, setFloorPlanModalVisible] = useState(false);
@@ -311,22 +322,22 @@ useEffect(() => {
         </TouchableOpacity>
 
         {/* Virtual Tour & Floor Plan Buttons */}
-        {((listing.VirtualTours && listing.VirtualTours > 0) || (listing.FloorPlans && listing.FloorPlans > 0)) && (
+        {(hasVirtualTours || hasFloorPlans) ? (
           <View style={styles.tourButtonsContainer}>
-            {listing.VirtualTours && listing.VirtualTours > 0 && (
+            {hasVirtualTours ? (
               <TouchableOpacity style={styles.tourButton} onPress={openVirtualTour}>
                 <Ionicons name="play-circle" size={20} color="#fff" />
                 <Text style={styles.tourButtonText}>Virtual Tour</Text>
               </TouchableOpacity>
-            )}
-            {listing.FloorPlans && listing.FloorPlans > 0 && (
+            ) : null}
+            {hasFloorPlans ? (
               <TouchableOpacity style={styles.tourButton} onPress={openFloorPlan}>
                 <Ionicons name="business" size={20} color="#fff" />
                 <Text style={styles.tourButtonText}>Floor Plan</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </View>
-        )}
+        ) : null}
 
         {/* Contact Buttons */}
         <View style={styles.contactButtons}>
@@ -341,33 +352,33 @@ useEffect(() => {
         </View>
 
         {/* New Information Sections - Only show if data exists */}
-        {safeTimeline && (typeof safeTimeline === 'string' || safeTimeline.length > 0) && (
+        {hasTimeline ? (
           <PropertyTimeline timeline={safeTimeline} />
-        )}
+        ) : null}
 
-        {safeSchools && safeSchools.length > 0 && (
+        {safeSchools ? (
           <CollapsibleInfoSection
             title="Nearby Schools"
             icon="school"
             data={safeSchools}
           />
-        )}
+        ) : null}
 
-        {safeStations && safeStations.length > 0 && (
+        {safeStations ? (
           <CollapsibleInfoSection
             title="Nearby Stations"
             icon="train"
             data={safeStations}
           />
-        )}
+        ) : null}
 
-        {safeAdditionalInfo && (typeof safeAdditionalInfo === 'string' || Object.keys(safeAdditionalInfo).length > 0) && (
+        {safeAdditionalInfo ? (
           <CollapsibleInfoSection
             title="Additional Information"
             icon="information-circle"
             data={safeAdditionalInfo}
           />
-        )}
+        ) : null}
 
         {/* Spacing before CTA */}
         <View style={styles.sectionSpacing} />

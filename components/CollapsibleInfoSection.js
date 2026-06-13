@@ -2,6 +2,66 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+const firstText = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return '';
+};
+
+const formatInfoValue = (item) => {
+  if (item === null || item === undefined) return null;
+  if (typeof item === 'string' || typeof item === 'number') {
+    const label = String(item).trim();
+    return label ? { label, value: '' } : null;
+  }
+
+  if (typeof item !== 'object') return null;
+
+  const label = firstText(
+    item.label,
+    item.name,
+    item.Name,
+    item.title,
+    item.Title,
+    item.school_name,
+    item.station_name,
+    item.SchoolName,
+    item.StationName,
+    item.type,
+    item.Type
+  );
+  const value = firstText(
+    item.value,
+    item.distance,
+    item.Distance,
+    item.distanceText,
+    item.DistanceText,
+    item.distance_miles,
+    item.distanceMiles,
+    item.rating,
+    item.Rating,
+    item.details,
+    item.Details
+  );
+
+  if (label || value) return { label, value };
+
+  const fallback = Object.entries(item)
+    .map(([key, entryValue]) => {
+      if (entryValue === null || entryValue === undefined || typeof entryValue === 'object') return null;
+      const text = String(entryValue).trim();
+      return text ? `${key}: ${text}` : null;
+    })
+    .filter(Boolean)
+    .join(' / ');
+
+  return fallback ? { label: fallback, value: '' } : null;
+};
+
 export default function CollapsibleInfoSection({ title, icon, data, children }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -53,7 +113,16 @@ export default function CollapsibleInfoSection({ title, icon, data, children }) 
     return null;
   }
 
-  console.log(`✅ CollapsibleInfoSection (${title}): Rendering with`, dataArray.length, 'items');
+  const displayItems = dataArray
+    .map(formatInfoValue)
+    .filter((item) => item && (item.label || item.value));
+
+  if (displayItems.length === 0) {
+    console.log(`❌ CollapsibleInfoSection (${title}): Not rendering - no displayable rows`);
+    return null;
+  }
+
+  console.log(`✅ CollapsibleInfoSection (${title}): Rendering with`, displayItems.length, 'items');
 
   return (
     <View style={styles.container}>
@@ -64,7 +133,7 @@ export default function CollapsibleInfoSection({ title, icon, data, children }) 
         <View style={styles.headerLeft}>
           <Ionicons name={icon} size={20} color="#007AFF" />
           <Text style={styles.title}>{String(title || '')}</Text>
-          <Text style={styles.count}>({String(dataArray.length)})</Text>
+          <Text style={styles.count}>({String(displayItems.length)})</Text>
         </View>
         <Ionicons
           name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -77,10 +146,12 @@ export default function CollapsibleInfoSection({ title, icon, data, children }) 
         <View style={styles.content}>
           {children || (
             <ScrollView showsVerticalScrollIndicator={false}>
-              {dataArray.map((item, index) => (
+              {displayItems.map((item, index) => (
                 <View key={index} style={styles.item}>
                   <Text style={styles.itemLabel}>{String(item.label || '')}</Text>
-                  <Text style={styles.itemValue}>{String(item.value || '')}</Text>
+                  {!!item.value && (
+                    <Text style={styles.itemValue}>{String(item.value)}</Text>
+                  )}
                 </View>
               ))}
             </ScrollView>
