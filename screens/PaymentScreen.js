@@ -15,25 +15,27 @@ import { processSubscriptionPayment, confirmSubscriptionPayment } from '../servi
 
 export default function PaymentScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
-  const { tier, billingInterval = 'month' } = route.params || {};
+  const { tier, billingInterval = 'month', reactivate = false } = route.params || {};
   const { reloadSubscriptionData, userProfile } = useSubscription();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [stripeIntentId, setStripeIntentId] = useState(null);
+  const [completedWithoutPaymentSheet, setCompletedWithoutPaymentSheet] = useState(false);
   const initializationStartedRef = useRef(false);
   const paymentCompletedRef = useRef(false);
 
   const { initializePaymentSheet, openPaymentSheet, loading: sheetLoading } = useStripePaymentSheet();
 
   const price = tier?.prices?.[billingInterval];
-  const isTrial = tier?.trial?.enabled;
+  const isTrial = tier?.trial?.enabled && !reactivate;
   const trialDuration = tier?.trial?.durationDays;
 
-  const completeSubscriptionFlow = async (intentId = stripeIntentId) => {
+  const completeSubscriptionFlow = async (intentId = stripeIntentId, options = {}) => {
     if (paymentCompletedRef.current) return;
     paymentCompletedRef.current = true;
+    const completedAsUpgrade = options.completedWithoutPaymentSheet || completedWithoutPaymentSheet;
 
-    if (intentId) {
+    if (intentId && !completedAsUpgrade) {
       const confirmation = await confirmSubscriptionPayment(intentId, tier.key, billingInterval);
       if (!confirmation.success) {
         console.warn('Subscription confirmation failed after Stripe success:', confirmation.error);
@@ -43,12 +45,16 @@ export default function PaymentScreen({ route, navigation }) {
     await new Promise(resolve => setTimeout(resolve, 1500));
     await reloadSubscriptionData();
 
-    const successMessage = isTrial
+    const successMessage = reactivate
+      ? `Your ${tier.name} subscription has been reactivated. Your original trial dates are unchanged.`
+      : completedAsUpgrade
+      ? `Your subscription has been updated to ${tier.name}.`
+      : isTrial
       ? `You've successfully started your ${trialDuration}-day free trial of ${tier.name}!`
       : `You've successfully subscribed to ${tier.name}!`;
 
     Alert.alert(
-      isTrial ? 'Trial Started!' : 'Payment Successful!',
+      reactivate ? 'Subscription Reactivated!' : completedAsUpgrade ? 'Subscription Updated!' : isTrial ? 'Trial Started!' : 'Payment Successful!',
       successMessage,
       [
         {
@@ -73,7 +79,7 @@ export default function PaymentScreen({ route, navigation }) {
       const userName = userProfile?.name || userProfile?.Name || userProfile?.fullName || 'Mrktfy User';
 
       // Process subscription payment
-      const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName, userProfile);
+      const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName, userProfile, { reactivate });
 
       if (!paymentResult.success) {
         throw new Error(paymentResult.error);
@@ -84,6 +90,12 @@ export default function PaymentScreen({ route, navigation }) {
       const intentId = paymentResult.paymentIntentId || paymentResult.setupIntentId || paymentResult.subscriptionId || null;
       setStripeIntentId(intentId);
 
+      if (!paymentResult.requiresPaymentSheet) {
+        setCompletedWithoutPaymentSheet(true);
+        await completeSubscriptionFlow(intentId, { completedWithoutPaymentSheet: true });
+        return;
+      }
+
       // Initialize payment sheet with the payment intent and Apple Pay config
       const { success } = await initializePaymentSheet({
         paymentIntent: paymentResult.paymentIntent,
@@ -91,7 +103,7 @@ export default function PaymentScreen({ route, navigation }) {
         ephemeralKey: paymentResult.ephemeralKey,
         customer: paymentResult.customer,
         applePayConfig,
-        primaryButtonLabel: isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}`,
+        primaryButtonLabel: reactivate ? 'Reactivate subscription' : isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}`,
       });
 
       if (success) {
@@ -188,7 +200,7 @@ export default function PaymentScreen({ route, navigation }) {
             <>
               <Ionicons name="lock-closed" size={20} color="#fff" />
               <Text style={styles.payButtonText}>
-                {isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}${billingInterval === 'month' ? '/month' : '/year'}`}
+                {reactivate ? 'Reactivate subscription' : isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}${billingInterval === 'month' ? '/month' : '/year'}`}
               </Text>
             </>
           )}

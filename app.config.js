@@ -77,6 +77,7 @@ plugins: [
     // ✅ Build-time envs (read from EAS or local dotenv/env-cmd)
     // if run with npx expo start --config app.config.js, these will be undefined but read from .env
     API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? "",
+    API_BACKUP_BASE_URL: process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL ?? process.env.API_BACKUP_BASE_URL ?? "",
     API_KEY: process.env.EXPO_PUBLIC_API_KEY ?? process.env.API_KEY ?? "",
     APP_ENV: process.env.EXPO_PUBLIC_APP_ENV ?? process.env.APP_ENV ?? "production",
     GOOGLE_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? "",

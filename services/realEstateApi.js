@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-const { API_BASE_URL, API_KEY } = Constants.expoConfig.extra;
+const { API_BASE_URL, API_BACKUP_BASE_URL, API_KEY } = Constants.expoConfig.extra;
 
 // Now supports an optional 4th param: `type` = 'rental' | 'sale'
 export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale') => {
@@ -9,12 +9,22 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale')
   console.log('Calling:', url);
 
   try {
-    const res = await fetch(url, {
+    const requestOptions = {
       headers: {
         'x-api-key': API_KEY,
         Accept: 'application/json',
       },
-    });
+    };
+
+    let res;
+    try {
+      res = await fetch(url, requestOptions);
+    } catch (fetchError) {
+      if (!API_BACKUP_BASE_URL) throw fetchError;
+      url = `${API_BACKUP_BASE_URL}/realestate/nearby?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}&type=${apiType}`;
+      console.log('Primary nearby listings request failed, retrying backup:', url);
+      res = await fetch(url, requestOptions);
+    }
 
     const contentType = res.headers.get('content-type');
     if (!res.ok || !contentType?.includes('application/json')) {

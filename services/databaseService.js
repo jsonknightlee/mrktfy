@@ -9,6 +9,7 @@ console.log('🔧 Environment Debug - All EXPO_PUBLIC_* vars:', Object.keys(proc
 
 const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
 const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_BACKUP_BASE_URL = extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL || '';
 const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
 
 console.log('🔧 Final API_BASE_URL:', API_BASE_URL);
@@ -18,6 +19,7 @@ console.log('🔧 Final API_KEY:', API_KEY ? 'SET' : 'NOT SET');
 class DatabaseService {
   constructor() {
     this.baseURL = API_BASE_URL;
+    this.backupBaseURL = API_BACKUP_BASE_URL;
     this.apiKey = API_KEY;
     
     console.log('🔧 DatabaseService Constructor - baseURL:', this.baseURL);
@@ -39,6 +41,17 @@ class DatabaseService {
   // Generic API request helper using axios
   async apiRequest(endpoint, options = {}) {
     const fullUrl = `${this.baseURL}/${endpoint.replace(/^\//, '')}`;
+    const requestConfig = {
+      url: endpoint,
+      method: options.method || 'GET',
+      data: options.body ? JSON.parse(options.body) : undefined,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        ...(options.headers || {}),
+      }
+    };
+
     console.log('🌐 Database Service - Full URL:', fullUrl);
     console.log('🌐 Database Service - Base URL:', this.baseURL);
     console.log('🌐 Database Service - Endpoint:', endpoint);
@@ -53,18 +66,6 @@ class DatabaseService {
         data: options.body ? JSON.parse(options.body) : undefined,
         headers: this.axiosInstance.defaults.headers
       });
-      
-      // Log the exact request that will be sent
-      const requestConfig = {
-        url: endpoint,
-        method: options.method || 'GET',
-        data: options.body ? JSON.parse(options.body) : undefined,
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          ...(options.headers || {}),
-        }
-      };
       
       console.log('🌐 Database Service - EXACT REQUEST BEING SENT:');
       console.log('🌐 - URL:', `${this.baseURL}/${endpoint}`);
@@ -87,6 +88,15 @@ class DatabaseService {
       console.log('🌐 Database Service - Success, data length:', Array.isArray(result) ? result.length : 'N/A');
       return result;
     } catch (error) {
+      if (!error.response && this.backupBaseURL) {
+        console.log('🌐 Database Service - Primary failed, retrying backup:', this.backupBaseURL);
+        const backupResponse = await axios.request({
+          ...requestConfig,
+          baseURL: this.backupBaseURL,
+        });
+        return backupResponse.data;
+      }
+
       console.error(`Database service error for ${endpoint}:`, error);
       console.error('🌐 Database Service - Error details:', {
         fullUrl,

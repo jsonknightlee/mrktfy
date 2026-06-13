@@ -5,6 +5,7 @@ const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
 
 const getPaymentConfig = () => ({
   apiBaseUrl: extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL,
+  apiBackupBaseUrl: extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL,
   apiKey: extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY,
 });
 
@@ -53,7 +54,7 @@ const parseJsonResponse = async (response) => {
 };
 
 const requestPaymentJson = async (path, body) => {
-  const { apiBaseUrl } = getPaymentConfig();
+  const { apiBaseUrl, apiBackupBaseUrl } = getPaymentConfig();
 
   if (!apiBaseUrl) {
     throw new Error('EXPO_PUBLIC_API_BASE_URL is not configured');
@@ -61,11 +62,20 @@ const requestPaymentJson = async (path, body) => {
 
   console.log('💳 [STRIPE] Backend request:', `${apiBaseUrl}${path}`);
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const requestOptions = {
     method: 'POST',
     headers: await buildHeaders(),
     body: JSON.stringify(body),
-  });
+  };
+
+  let response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, requestOptions);
+  } catch (error) {
+    if (!apiBackupBaseUrl) throw error;
+    console.log('💳 [STRIPE] Primary backend failed, retrying backup:', `${apiBackupBaseUrl}${path}`);
+    response = await fetch(`${apiBackupBaseUrl}${path}`, requestOptions);
+  }
 
   return parseJsonResponse(response);
 };
@@ -137,8 +147,13 @@ const normalizeSubscriptionPayment = (data) => {
     paymentIntentId: payload.paymentIntentId || payload.paymentIntent?.id || paymentIntentValue?.id || nestedInvoicePaymentIntent?.id || null,
     setupIntentId: payload.setupIntentId || payload.setupIntent?.id || setupIntentValue?.id || nestedSetupIntent?.id || null,
     status: payload.status || payload.subscription?.status || null,
+    upgraded: Boolean(payload.upgraded || payload.subscriptionUpgraded || payload.planChanged),
   };
 };
+
+const isCompletedSubscriptionStatus = (status) => (
+  ['active', 'trialing'].includes(String(status || '').toLowerCase())
+);
 
 const getProfileUserId = (userProfile) => (
   userProfile?.userId ||
@@ -151,6 +166,20 @@ const getProfileUserId = (userProfile) => (
   userProfile?.id ||
   userProfile?.ID ||
   userProfile?.ProfileID ||
+  null
+);
+
+const getProfileStripeSubscriptionId = (userProfile) => (
+  userProfile?.StripeSubscriptionID ||
+  userProfile?.stripeSubscriptionId ||
+  userProfile?.subscriptionId ||
+  null
+);
+
+const getProfileStripeCustomerId = (userProfile) => (
+  userProfile?.StripeCustomerID ||
+  userProfile?.stripeCustomerId ||
+  userProfile?.customerId ||
   null
 );
 
@@ -209,7 +238,7 @@ export const createEphemeralKey = async (customerId) => {
 };
 
 // Complete payment flow for subscription
-export const processSubscriptionPayment = async (tier, billingInterval, userEmail, userName, userProfile = null) => {
+export const processSubscriptionPayment = async (tier, billingInterval, userEmail, userName, userProfile = null, options = {}) => {
   try {
     const userId = toNonEmptyString(getProfileUserId(userProfile) || await getTokenUserId());
     const subscriptionLevelId = toNonEmptyString(tier.key);
@@ -234,14 +263,35 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
         userId,
         subscriptionLevelId,
         billingInterval: interval,
+        reactivate: !!options.reactivate,
       },
-      trialDays: tier.trial?.enabled ? tier.trial.durationDays : 0,
-      collectPaymentMethodForTrial: !!tier.trial?.enabled,
+      reactivate: !!options.reactivate,
+      trialDays: options.reactivate ? 0 : tier.trial?.enabled ? tier.trial.durationDays : 0,
+      collectPaymentMethodForTrial: options.reactivate ? false : !!tier.trial?.enabled,
     });
 
     const normalized = normalizeSubscriptionPayment(subscriptionResult);
+    const hasExistingStripeBilling =
+      Boolean(getProfileStripeSubscriptionId(userProfile)) ||
+      Boolean(getProfileStripeCustomerId(userProfile));
 
-    if (!normalized.paymentIntent && !normalized.setupIntent) {
+    const hasStripeClientSecret = Boolean(normalized.paymentIntent || normalized.setupIntent);
+    const completedWithoutNewIntent = Boolean(
+      normalized.subscriptionId &&
+      (isCompletedSubscriptionStatus(normalized.status) || hasExistingStripeBilling) &&
+      !hasStripeClientSecret
+    );
+
+    if (normalized.upgraded || completedWithoutNewIntent) {
+      return {
+        success: true,
+        requiresPaymentSheet: false,
+        upgraded: true,
+        ...normalized,
+      };
+    }
+
+    if (!hasStripeClientSecret) {
       const missingSecretMessage = tier.trial?.enabled
         ? 'Stripe backend created the trial but did not return a setupIntent client secret for card collection'
         : 'Stripe backend did not return a paymentIntent client secret';
@@ -282,6 +332,22 @@ export const cancelStripeSubscription = async ({
     return { success: true, data };
   } catch (error) {
     console.error('❌ Stripe subscription cancellation error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const reactivateStripeSubscription = async ({
+  userId,
+  subscriptionId,
+} = {}) => {
+  try {
+    const data = await requestPaymentJson('/api/stripe/reactivate-subscription', {
+      userId: toNonEmptyString(userId),
+      subscriptionId: toNonEmptyString(subscriptionId),
+    });
+    return { success: true, data };
+  } catch (error) {
+    console.error('Stripe subscription reactivation error:', error);
     return { success: false, error: error.message };
   }
 };

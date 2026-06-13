@@ -34,8 +34,39 @@ const getStatusTag = (listing) => {
   return trimmed.length ? trimmed : null;
 };
 
+const getListingId = (listing) => (
+  listing?.ID ??
+  listing?.id ??
+  listing?.ListingID ??
+  listing?.listingId ??
+  ''
+);
+
+const normalizeDetailListing = (rawListing) => {
+  const sourceListing = rawListing?.listing || rawListing?.Listing || rawListing?.property || rawListing?.Property || rawListing?.propertyListing || rawListing?.PropertyListing || rawListing || {};
+
+  return {
+    ...rawListing,
+    ...sourceListing,
+    ID: getListingId(sourceListing) || getListingId(rawListing),
+    Title: sourceListing.Title ?? sourceListing.title ?? rawListing?.Title ?? rawListing?.title,
+    Price: sourceListing.Price ?? sourceListing.price ?? rawListing?.Price ?? rawListing?.price,
+    Description: sourceListing.Description ?? sourceListing.description ?? rawListing?.Description ?? rawListing?.description,
+    ImageUrls: sourceListing.ImageUrls ?? sourceListing.imageUrls ?? sourceListing.imageUrl ?? rawListing?.ImageUrls ?? rawListing?.imageUrls ?? rawListing?.imageUrl,
+    PropertyTimeline: sourceListing.PropertyTimeline ?? sourceListing.propertyTimeline ?? rawListing?.PropertyTimeline ?? rawListing?.propertyTimeline,
+    AdditionalInfo: sourceListing.AdditionalInfo ?? sourceListing.additionalInfo ?? rawListing?.AdditionalInfo ?? rawListing?.additionalInfo,
+    Schools: sourceListing.Schools ?? sourceListing.NearbySchools ?? sourceListing.nearbySchools ?? rawListing?.Schools ?? rawListing?.NearbySchools ?? rawListing?.nearbySchools,
+    Stations: sourceListing.Stations ?? sourceListing.NearbyStations ?? sourceListing.nearbyStations ?? rawListing?.Stations ?? rawListing?.NearbyStations ?? rawListing?.nearbyStations,
+    Latitude: sourceListing.Latitude ?? sourceListing.latitude ?? rawListing?.Latitude ?? rawListing?.latitude,
+    Longitude: sourceListing.Longitude ?? sourceListing.longitude ?? rawListing?.Longitude ?? rawListing?.longitude,
+    ListingURL: sourceListing.ListingURL ?? sourceListing.listingUrl ?? sourceListing.listingURL ?? rawListing?.ListingURL ?? rawListing?.listingUrl ?? rawListing?.listingURL,
+    AgentPhone: sourceListing.AgentPhone ?? sourceListing.agentPhone ?? rawListing?.AgentPhone ?? rawListing?.agentPhone,
+    AgentEmail: sourceListing.AgentEmail ?? sourceListing.agentEmail ?? rawListing?.AgentEmail ?? rawListing?.agentEmail,
+  };
+};
+
 export default function ListingDetailScreen({ route, navigation }) {
-  const { listing } = route.params;
+  const listing = normalizeDetailListing(route.params?.listing);
   const modalRef = useRef(null);
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);

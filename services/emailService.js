@@ -1,7 +1,29 @@
 // Email Service for sending invoices and renewal reminders
+import Constants from 'expo-constants';
 
-const API_BASE_URL = 'http://192.168.1.74:3001';
-const API_KEY = '804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e';
+const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
+const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_BACKUP_BASE_URL = extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL || '';
+const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
+
+const postEmailJson = async (path, body) => {
+  const requestOptions = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': API_KEY,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  };
+
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, requestOptions);
+  } catch (error) {
+    if (!API_BACKUP_BASE_URL) throw error;
+    console.log('📧 [EMAIL] Primary API failed, retrying backup:', `${API_BACKUP_BASE_URL}${path}`);
+    return fetch(`${API_BACKUP_BASE_URL}${path}`, requestOptions);
+  }
+};
 
 /**
  * Send subscription invoice email
@@ -17,13 +39,7 @@ export const sendSubscriptionInvoice = async (subscriptionData, userData) => {
       email: userData.Email || userData.email
     });
 
-    const response = await fetch(`${API_BASE_URL}/api/email/invoice`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': API_KEY,
-      },
-      body: JSON.stringify({
+    const response = await postEmailJson('/api/email/invoice', {
         to: userData.Email || userData.email,
         subject: `Mrktfy Subscription Invoice - ${subscriptionData.SubscriptionLevelID?.toUpperCase()} Plan`,
         template: 'invoice',
@@ -38,7 +54,6 @@ export const sendSubscriptionInvoice = async (subscriptionData, userData) => {
           invoiceNumber: `INV-${Date.now()}`,
           invoiceDate: new Date().toISOString()
         }
-      })
     });
 
     if (response.ok) {
@@ -80,13 +95,7 @@ export const sendRenewalReminder = async (subscriptionData, userData, daysBefore
       email: userData.Email || userData.email
     });
 
-    const response = await fetch(`${API_BASE_URL}/api/email/renewal-reminder`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': API_KEY,
-      },
-      body: JSON.stringify({
+    const response = await postEmailJson('/api/email/renewal-reminder', {
         to: userData.Email || userData.email,
         subject: `Mrktfy Subscription Renewal Reminder - ${daysBeforeRenewal} days`,
         template: 'renewal-reminder',
@@ -99,7 +108,6 @@ export const sendRenewalReminder = async (subscriptionData, userData, daysBefore
           autoRenew: subscriptionData.AutoRenew || false,
           manageSubscriptionUrl: 'https://mrktfy.app/profile' // Link to manage subscription
         }
-      })
     });
 
     if (response.ok) {
@@ -129,13 +137,7 @@ export const sendCancellationConfirmation = async (subscriptionData, userData) =
       email: userData.Email || userData.email
     });
 
-    const response = await fetch(`${API_BASE_URL}/api/email/cancellation-confirmation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': API_KEY,
-      },
-      body: JSON.stringify({
+    const response = await postEmailJson('/api/email/cancellation-confirmation', {
         to: userData.Email || userData.email,
         subject: 'Mrktfy Subscription Cancellation Confirmation',
         template: 'cancellation-confirmation',
@@ -147,7 +149,6 @@ export const sendCancellationConfirmation = async (subscriptionData, userData) =
           accessUntilDate: subscriptionData.SubscriptionEndDate,
           reactivateUrl: 'https://mrktfy.app/profile' // Link to reactivate subscription
         }
-      })
     });
 
     if (response.ok) {
@@ -171,13 +172,7 @@ export const scheduleRenewalReminders = async () => {
   try {
     console.log('📧 [EMAIL] Checking for upcoming renewals...');
 
-    const response = await fetch(`${API_BASE_URL}/api/email/schedule-renewal-reminders`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': API_KEY,
-      }
-    });
+    const response = await postEmailJson('/api/email/schedule-renewal-reminders');
 
     if (response.ok) {
       const result = await response.json();

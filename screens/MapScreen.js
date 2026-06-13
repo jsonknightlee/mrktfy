@@ -17,6 +17,11 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { AdBanner } from '../services/adService';
 import { api } from '../services/api';
+import {
+  createPropertyDeckFromListings,
+  getPropertyDeckLimit,
+  getPropertyDecks,
+} from '../services/PropertyDeckService';
 
 // Show only if the date is before today (local device timezone)
 const isBeforeToday = (iso) => {
@@ -77,6 +82,7 @@ export default function MapScreen() {
 
   // Animations & refs
   const [badgeAnim] = useState(new Animated.Value(200));
+  const deckBorderAnim = useRef(new Animated.Value(0)).current;
   const isInteractingWithMarker = useRef(false);
   const isDismissingRef = useRef(false);
 
@@ -100,6 +106,15 @@ export default function MapScreen() {
       toastTimerRef.current = setTimeout(hideToast, duration);
     });
   };
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(deckBorderAnim, { toValue: 1, duration: 2600, useNativeDriver: true })
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [deckBorderAnim]);
   const hideToast = () => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
@@ -112,7 +127,7 @@ export default function MapScreen() {
 
   // Favorites
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
-  const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, loading, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus } = useSubscription();
+  const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, loading, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus, userProfile } = useSubscription();
   const navigation = useNavigation();
 
   const getListingPinColor = (listing) => {
@@ -324,6 +339,72 @@ export default function MapScreen() {
     navigation?.navigate?.('ListingDetail', { listing });
   };
 
+  const handleCreatePropertyDeck = async () => {
+    const deckLimit = getPropertyDeckLimit(currentTier);
+    if (deckLimit <= 0) {
+      navigation.navigate('Subscription');
+      return;
+    }
+
+    const sourceListings = listings;
+    if (!sourceListings.length) {
+      showToast('No properties in the current radius to add to a deck.');
+      return;
+    }
+
+    const existingDecks = await getPropertyDecks(userProfile);
+    if (existingDecks.length >= deckLimit) {
+      showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
+      return;
+    }
+
+    const searchRadiusKm = getMaxSearchRadius();
+    const filterJson = {
+      listingType: isRental ? TYPE_RENT : TYPE_SALE,
+      radiusKm: searchRadiusKm,
+      minPrice: filters.minPrice,
+      maxPrice: filters.maxPrice,
+      beds: filters.beds || null,
+      baths: filters.baths || null,
+      latitude: userLocation?.latitude || null,
+      longitude: userLocation?.longitude || null,
+    };
+
+    let deckCreationResult;
+    try {
+      deckCreationResult = await createPropertyDeckFromListings({
+        userProfile,
+        limit: deckLimit,
+        listings: sourceListings,
+        filterJson,
+      });
+    } catch (error) {
+      const status = error?.response?.status;
+      const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
+      showToast(backendMessage || `Property Deck creation failed${status ? ` (${status})` : ''}.`);
+      return;
+    }
+
+    const nextDecks = Array.isArray(deckCreationResult)
+      ? deckCreationResult
+      : deckCreationResult?.decks || [];
+    const createdDeck = deckCreationResult?.createdDeck || nextDecks.find((deck) => !existingDecks.some((existingDeck) => existingDeck.id === deck.id));
+    if (!createdDeck) {
+      showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
+      return;
+    }
+
+    console.log('[PROPERTY-DECK] navigating to created deck:', {
+      deckId: createdDeck.id,
+      deckListingCount: createdDeck.deckListingCount,
+    });
+
+    navigation.navigate('Deck', {
+      openDeckId: createdDeck.id,
+      createdFromMap: true,
+    });
+  };
+
   const handleFavoriteToggleWithAd = (listingId) => {
     // Directly toggle favorite without showing ad
     toggleFavorite(listingId);
@@ -363,6 +444,29 @@ export default function MapScreen() {
 
       <TouchableOpacity style={styles.filterBtn} onPress={() => setFilterModalVisible(true)}>
         <Ionicons name="filter" size={24} color="black" />
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.createDeckOuter} onPress={handleCreatePropertyDeck} activeOpacity={0.9}>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.createDeckRainbow,
+            {
+              transform: [{
+                rotate: deckBorderAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0deg', '360deg'],
+                }),
+              }],
+            },
+          ]}
+        />
+        <View style={styles.createDeckBtn}>
+          <Text style={styles.createDeckBtnText}>Create</Text>
+          <View style={styles.createDeckIconWrap}>
+            <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+          </View>
+        </View>
       </TouchableOpacity>
 
       {/* Subscription Badge */}
@@ -700,6 +804,59 @@ const styles = StyleSheet.create({
   filterBtn: {
     position: 'absolute', top: 50, left: 20, zIndex: 10,
     backgroundColor: 'white', padding: 10, borderRadius: 20, elevation: 3
+  },
+  createDeckOuter: {
+    position: 'absolute',
+    right: 20,
+    bottom: 34,
+    zIndex: 10,
+    borderRadius: 25,
+    elevation: 7,
+    height: 50,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    padding: 2,
+    width: 112,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  createDeckRainbow: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    backgroundColor: '#6366F1',
+    borderRadius: 75,
+    borderWidth: 38,
+    borderTopColor: '#FF4D8D',
+    borderRightColor: '#FACC15',
+    borderBottomColor: '#22C55E',
+    borderLeftColor: '#38BDF8',
+  },
+  createDeckBtn: {
+    alignItems: 'center',
+    backgroundColor: '#111827',
+    borderRadius: 23,
+    flexDirection: 'row',
+    height: 46,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    width: 108,
+  },
+  createDeckBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    marginRight: 7,
+  },
+  createDeckIconWrap: {
+    alignItems: 'center',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 16,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
   },
   card: {
     position: 'absolute', bottom: 30, left: 20, right: 20,

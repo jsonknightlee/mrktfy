@@ -6,8 +6,10 @@ import { getToken } from '../utils/tokenStorage';
 const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
 console.log('🔧 [API] Expo config extra:', extra);
 console.log('🔧 [API] API_BASE_URL from config:', extra.API_BASE_URL);
+console.log('🔧 [API] API_BACKUP_BASE_URL from config:', extra.API_BACKUP_BASE_URL);
 console.log('🔧 [API] API_KEY from config:', extra.API_KEY ? 'SET' : 'NOT SET');
 const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_BACKUP_BASE_URL = extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL || '';
 const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
 
 const commonHeaders = {
@@ -33,6 +35,44 @@ export const authApi = axios.create({
 
 console.log('🔧 [API] Created API instances with baseURL:', API_BASE_URL);
 console.log('🔧 [API] Auth API baseURL:', `${API_BASE_URL}/auth`);
+console.log('🔧 [API] Backup API baseURL:', API_BACKUP_BASE_URL || 'NOT SET');
+
+const shouldRetryWithBackup = (error) => (
+  API_BACKUP_BASE_URL &&
+  error?.config &&
+  !error.response &&
+  !error.config.__usedBackupBaseUrl
+);
+
+const loggedBackupRetries = new Set();
+const logBackupRetryOnce = (label, backupBaseURL) => {
+  const key = `${label}:${backupBaseURL}`;
+  if (loggedBackupRetries.has(key)) return;
+
+  loggedBackupRetries.add(key);
+  if (__DEV__ && process.env.EXPO_PUBLIC_VERBOSE_API_LOGS === 'true') {
+    console.log(`🔁 [API] ${label} primary failed, retrying backup:`, backupBaseURL);
+  }
+};
+
+const attachBackupRetry = (instance, backupBaseURL, label) =>
+  instance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      if (!shouldRetryWithBackup(error)) {
+        return Promise.reject(error);
+      }
+
+      const retryConfig = {
+        ...error.config,
+        baseURL: backupBaseURL,
+        __usedBackupBaseUrl: true,
+      };
+
+      logBackupRetryOnce(label, backupBaseURL);
+      return instance.request(retryConfig);
+    }
+  );
 
 // Add request interceptor to log exact requests
 authApi.interceptors.request.use((config) => {
@@ -92,3 +132,5 @@ const attachAuth = (instance) =>
 
 attachAuth(api);
 attachAuth(authApi);
+attachBackupRetry(api, API_BACKUP_BASE_URL, 'API');
+attachBackupRetry(authApi, API_BACKUP_BASE_URL ? `${API_BACKUP_BASE_URL}/auth` : '', 'AUTH');

@@ -1,10 +1,35 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import NotificationThrottler from './NotificationThrottler';
 import NotificationService from './NotificationService';
 import NotificationStorageService from './NotificationStorageService';
 import ProspectorRulesEngine from './ProspectorRulesEngine';
 import NaturalTimingEngine from './NaturalTimingEngine';
+
+const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
+const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_BACKUP_BASE_URL = extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL || '';
+const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
+
+const postLocationJson = async (path, body) => {
+  const requestOptions = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY,
+    },
+    body: JSON.stringify(body),
+  };
+
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, requestOptions);
+  } catch (error) {
+    if (!API_BACKUP_BASE_URL) throw error;
+    console.log('Location trigger primary API failed, retrying backup:', `${API_BACKUP_BASE_URL}${path}`);
+    return fetch(`${API_BACKUP_BASE_URL}${path}`, requestOptions);
+  }
+};
 
 class LocationTriggerEngine {
   constructor() {
@@ -188,18 +213,11 @@ class LocationTriggerEngine {
   // Check for hot zone trigger (user enters new area with listings)
   async checkHotZoneTrigger(location) {
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/location/check-hot-zone`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.EXPO_PUBLIC_API_KEY,
-        },
-        body: JSON.stringify({
+      const response = await postLocationJson('/location/check-hot-zone', {
           latitude: location.latitude,
           longitude: location.longitude,
           radius: 5000, // 5km for Prospector tier
           lastKnownLocation: this.lastKnownLocation,
-        }),
       });
 
       // Check if response is valid JSON before parsing
@@ -226,17 +244,10 @@ class LocationTriggerEngine {
   // Check for dwell trigger (user stays in area)
   async checkDwellTrigger(location) {
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL}/location/check-dwell`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.EXPO_PUBLIC_API_KEY,
-        },
-        body: JSON.stringify({
+      const response = await postLocationJson('/location/check-dwell', {
           latitude: location.latitude,
           longitude: location.longitude,
           radius: 5000,
-        }),
       });
 
       // Check if response is valid JSON before parsing

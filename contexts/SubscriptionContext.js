@@ -4,7 +4,7 @@ import { Alert, AppState } from 'react-native';
 import { databaseService } from '../services/databaseService';
 import { getToken, deleteToken } from '../services/authService';
 import { AuthContext } from './AuthContext';
-import { cancelStripeSubscription } from '../services/paymentService';
+import { cancelStripeSubscription, reactivateStripeSubscription } from '../services/paymentService';
 
 // Helper function to get subscription price
 const getSubscriptionPrice = (tierId) => {
@@ -948,6 +948,59 @@ export function SubscriptionProvider({ children }) {
         dispatch({ 
           type: SUBSCRIPTION_ACTIONS.SET_ERROR, 
           payload: 'Failed to cancel subscription' 
+        });
+        return false;
+      }
+    },
+    reactivateSubscription: async () => {
+      try {
+        let userId =
+          state.userProfile?.UserID ||
+          state.userProfile?.userId ||
+          state.userProfile?.UserId ||
+          'current-user';
+
+        try {
+          const token = await getToken();
+          if (token) {
+            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+            userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || userId;
+            console.log('[SUBSCRIPTION] reactivateSubscription extracted userId:', userId);
+          }
+        } catch (tokenError) {
+          console.error('[SUBSCRIPTION] Failed to get user ID from token:', tokenError);
+        }
+
+        const subscriptionId =
+          state.userProfile?.StripeSubscriptionID ||
+          state.userProfile?.stripeSubscriptionId ||
+          null;
+
+        console.log('[SUBSCRIPTION] Reactivating Stripe subscription:', { userId, subscriptionId });
+
+        const result = await reactivateStripeSubscription({
+          userId,
+          subscriptionId,
+        });
+
+        if (!result.success) {
+          dispatch({
+            type: SUBSCRIPTION_ACTIONS.SET_ERROR,
+            payload: result.error || 'Failed to reactivate subscription',
+          });
+          return false;
+        }
+
+        await clearSubscriptionStorage();
+        await value.reloadSubscriptionData();
+
+        console.log('[SUBSCRIPTION] Stripe reactivation completed');
+        return true;
+      } catch (error) {
+        console.error('Reactivate subscription error:', error);
+        dispatch({
+          type: SUBSCRIPTION_ACTIONS.SET_ERROR,
+          payload: 'Failed to reactivate subscription',
         });
         return false;
       }
