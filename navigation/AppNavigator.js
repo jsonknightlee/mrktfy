@@ -14,6 +14,9 @@ import PropertyDeckScreen from '../screens/PropertyDeckScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ListingDetailScreen from '../screens/ListingDetailScreen';
+import DecisionBoardScreen from '../screens/DecisionBoardScreen';
+import DecisionBoardListingScreen from '../screens/DecisionBoardListingScreen';
+import DecisionBoardListScreen from '../screens/DecisionBoardListScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import NotificationListingsScreen from '../screens/NotificationListingsScreen';
 import SubscriptionScreen from '../screens/SubscriptionScreen';
@@ -38,6 +41,11 @@ function MainTabs() {
         name="Deck"
         component={PropertyDeckScreen}
         options={{ tabBarIcon: ({ color, size }) => <Ionicons name="albums" size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Decision"
+        component={DecisionBoardListScreen}
+        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="flag" size={size} color={color} /> }}
       />
       <Tab.Screen
         name="AR"
@@ -96,6 +104,33 @@ export default function AppNavigator() {
             <Stack.Screen
               name="NotificationListings"
               component={NotificationListingsScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="DecisionBoard"
+              component={DecisionBoardScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="DecisionBoardListing"
+              component={DecisionBoardListingScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="DecisionBoards"
+              component={DecisionBoardListScreen}
               options={{
                 headerShown: false,
                 gestureEnabled: true,

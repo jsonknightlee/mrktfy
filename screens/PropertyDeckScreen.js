@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { addListingToDecisionBoardProject } from '../services/DecisionBoardService';
 import { getListingById } from '../services/listingApi';
 import {
   archivePropertyDeck,
@@ -41,6 +42,7 @@ const FLOW_STEPS = [
   { key: 'detail', label: 'Property Deck' },
   { key: 'shortlist', label: 'Shortlist' },
   { key: 'board', label: 'Board' },
+  { key: 'decision', label: 'Decision' },
 ];
 const PROPERTY_TYPE_OPTIONS = [
   { key: 'all', label: 'Show all' },
@@ -472,6 +474,7 @@ export default function PropertyDeckScreen({ route }) {
   const [loading, setLoading] = useState(true);
   const [comparisonBoard, setComparisonBoard] = useState(null);
   const [loadingBoard, setLoadingBoard] = useState(false);
+  const [decisionCreatingListingId, setDecisionCreatingListingId] = useState(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [deckFilters, setDeckFilters] = useState(createDefaultDeckFilters);
 
@@ -900,6 +903,34 @@ export default function PropertyDeckScreen({ route }) {
     });
   };
 
+  const openDecisionBoard = async (listing) => {
+    const listingId = getListingId(listing);
+    if (!listingId || decisionCreatingListingId) return;
+
+    setDecisionCreatingListingId(listingId);
+    try {
+      const decisionBoard = await addListingToDecisionBoardProject({
+        listingId,
+        shortListId: listing.shortListId || listing.ShortListID || comparisonBoard?.shortListId || comparisonBoard?.ShortListID,
+        comparisonBoardId: comparisonBoard?.id || comparisonBoard?.ID,
+        boardName: `${selectedDeck?.name || 'Property'} Decisions`,
+      });
+
+      navigation.navigate('DecisionBoard', {
+        decisionBoardId: decisionBoard?.id,
+        decisionBoard,
+        sourceFlow: 'propertyDeck',
+      });
+    } catch (error) {
+      Alert.alert(
+        'Could not open Decision Board',
+        error?.response?.data?.error || error?.response?.data?.message || error?.message || 'This property could not be added to a Decision Board.'
+      );
+    } finally {
+      setDecisionCreatingListingId(null);
+    }
+  };
+
   const confirmArchiveDeck = (deck) => {
     Alert.alert(
       'Delete Property Deck',
@@ -1286,6 +1317,7 @@ export default function PropertyDeckScreen({ route }) {
     const userRating = getUserMatchRating(item);
     const listingId = getListingId(item);
     const distanceText = formatSearchDistance(item);
+    const creatingDecision = decisionCreatingListingId === listingId;
 
     return (
       <TouchableOpacity
@@ -1330,6 +1362,14 @@ export default function PropertyDeckScreen({ route }) {
         </View>
 
         <TouchableOpacity
+          style={[styles.decisionButton, creatingDecision && styles.disabledDecisionButton]}
+          onPress={() => openDecisionBoard(item)}
+          disabled={creatingDecision}
+        >
+          <Ionicons name="flag-outline" size={17} color={creatingDecision ? '#94A3B8' : APP_PURPLE} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={styles.removeButton}
           onPress={() => handleRemoveFromShortlist(listingId)}
         >
@@ -1355,13 +1395,12 @@ export default function PropertyDeckScreen({ route }) {
     const imageUrl = normalizeImageUrls(item)[0];
     const notes = getComparisonNotes(item);
     const distanceText = formatSearchDistance(item);
+    const listingId = getListingId(item);
+    const creatingDecision = decisionCreatingListingId === listingId;
 
     return (
-      <TouchableOpacity
-        style={styles.compareCard}
-        activeOpacity={0.9}
-        onPress={() => openListingPreview(item)}
-      >
+      <View style={styles.compareCard}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => openListingPreview(item)}>
         <Text style={styles.compareLabel}>{label}</Text>
         {imageUrl ? (
           <Image source={{ uri: imageUrl }} style={styles.compareImage} />
@@ -1391,7 +1430,18 @@ export default function PropertyDeckScreen({ route }) {
             <Text key={`con-${index}`} style={styles.compareNote}>- {note}</Text>
           ))}
         </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.compareDecisionButton, creatingDecision && styles.disabledDecisionButton]}
+          onPress={() => openDecisionBoard(item)}
+          disabled={creatingDecision}
+        >
+          <Ionicons name="flag-outline" size={18} color={creatingDecision ? '#94A3B8' : '#FFFFFF'} />
+          <Text style={[styles.compareDecisionButtonText, creatingDecision && styles.disabledDecisionButtonText]}>
+            {creatingDecision ? 'Opening...' : 'Pursue'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -2219,6 +2269,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 34,
   },
+  decisionButton: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    height: 36,
+    justifyContent: 'center',
+    marginRight: 4,
+    width: 36,
+  },
+  disabledDecisionButton: {
+    backgroundColor: '#F1F5F9',
+  },
+  disabledDecisionButtonText: {
+    color: '#94A3B8',
+  },
   boardIntro: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -2315,6 +2380,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: 260,
     padding: 18,
+  },
+  compareDecisionButton: {
+    alignItems: 'center',
+    backgroundColor: APP_PURPLE,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    minHeight: 42,
+  },
+  compareDecisionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+    marginLeft: 7,
   },
   boardCard: {
     alignItems: 'center',

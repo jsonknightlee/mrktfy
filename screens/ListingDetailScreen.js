@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
   Linking,
   Image,
   Dimensions,
@@ -22,6 +23,7 @@ import VirtualTourModal from '../components/VirtualTourModal';
 import PropertyTimeline from '../components/PropertyTimeline';
 import CollapsibleInfoSection from '../components/CollapsibleInfoSection';
 import AdModal from '../components/AdModal';
+import { addListingToDecisionBoardProject } from '../services/DecisionBoardService';
 
 const { width } = Dimensions.get('window');
 const MODAL_HEIGHT = Dimensions.get("window").height * 0.9;
@@ -96,6 +98,7 @@ export default function ListingDetailScreen({ route, navigation }) {
 
   const [virtualTourModalVisible, setVirtualTourModalVisible] = useState(false);
   const [floorPlanModalVisible, setFloorPlanModalVisible] = useState(false);
+  const [creatingDecisionBoard, setCreatingDecisionBoard] = useState(false);
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
   const { currentTier, shouldShowAd } = useSubscription();
   const isFavorited = getFavoriteStatus(listing.ID)?.isFavorited ?? !!route.params.listing?.isFavorited;
@@ -138,7 +141,6 @@ export default function ListingDetailScreen({ route, navigation }) {
 const normalizeImageUrls = (val) => {
   if (!val) return [];
   if (Array.isArray(val)) {
-    console.log('🖼️ normalizeImageUrls - Array input:', val.slice(0, 3)); // Debug first 3
     return val.filter(Boolean);
   }
 
@@ -150,7 +152,6 @@ const normalizeImageUrls = (val) => {
     if (s.startsWith("[") && s.endsWith("]")) {
       try {
         const parsed = JSON.parse(s);
-        console.log('🖼️ normalizeImageUrls - Parsed JSON:', parsed.slice(0, 3)); // Debug first 3
         return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
       } catch {
         // fall through
@@ -159,7 +160,6 @@ const normalizeImageUrls = (val) => {
 
     // delimited or single URL
     const result = s.split(/[,|;]+/).map(x => x.trim()).filter(Boolean);
-    console.log('🖼️ normalizeImageUrls - Split result:', result.slice(0, 3)); // Debug first 3
     return result;
   }
 
@@ -169,7 +169,6 @@ const normalizeImageUrls = (val) => {
   const imageUrls = normalizeImageUrls(listing.ImageUrls ?? listing.imageUrls ?? listing.imageUrl);
 
 useEffect(() => {
-  console.log('🖼️ Final imageUrls for listing', listing.ID, ':', imageUrls.slice(0, 5)); // Debug first 5
   modalRef.current?.open();
   setLastViewed(listing.ID); // 👈 if you want to record the view here too
 }, []);
@@ -181,6 +180,31 @@ useEffect(() => {
 
   const openDial = () => Linking.openURL(`tel:${listing.AgentPhone}`);
   const openMail = () => Linking.openURL(`mailto:${listing.AgentEmail}`);
+
+  const openDecisionBoard = async () => {
+    const listingId = getListingId(listing);
+    if (!listingId || creatingDecisionBoard) return;
+
+    setCreatingDecisionBoard(true);
+    try {
+      const decisionBoard = await addListingToDecisionBoardProject({
+        listingId,
+        boardName: 'Property Decisions',
+      });
+
+      navigation.navigate('DecisionBoard', {
+        decisionBoardId: decisionBoard?.id,
+        decisionBoard,
+      });
+    } catch (error) {
+      Alert.alert(
+        'Could not open Decision Board',
+        error?.response?.data?.error || error?.response?.data?.message || error?.message || 'This property could not be added to a Decision Board.'
+      );
+    } finally {
+      setCreatingDecisionBoard(false);
+    }
+  };
 
   const generateVirtualTourUrl = () => {
     if (!listing.ListingURL) return null;
@@ -297,6 +321,17 @@ useEffect(() => {
         ) : null}
 
         <Text style={styles.description}>{String(listing.Description || '')}</Text>
+
+        <TouchableOpacity
+          style={[styles.decisionButton, creatingDecisionBoard && styles.decisionButtonDisabled]}
+          onPress={openDecisionBoard}
+          disabled={creatingDecisionBoard}
+        >
+          <Ionicons name="flag-outline" size={20} color={creatingDecisionBoard ? '#94A3B8' : '#fff'} />
+          <Text style={[styles.decisionButtonText, creatingDecisionBoard && styles.decisionButtonTextDisabled]}>
+            {creatingDecisionBoard ? 'Opening Decision Board...' : 'Pursue in Decision Board'}
+          </Text>
+        </TouchableOpacity>
 
         {/* Mini Map */}
         <TouchableOpacity onPress={openMap} style={styles.mapContainer} activeOpacity={0.9}>
@@ -483,6 +518,28 @@ const styles = StyleSheet.create({
   },
   metaText: { fontSize: 16, color: '#666', fontWeight:'600' },
   description: { fontSize: 14, color: '#333', marginHorizontal: 16, marginBottom: 16 },
+  decisionButton: {
+    alignItems: 'center',
+    backgroundColor: '#6366F1',
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    minHeight: 46,
+  },
+  decisionButtonDisabled: {
+    backgroundColor: '#E5E7EB',
+  },
+  decisionButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+    marginLeft: 8,
+  },
+  decisionButtonTextDisabled: {
+    color: '#94A3B8',
+  },
   mapContainer: { marginHorizontal: 16, marginBottom: 16 },
   map: { height: 150, borderRadius: 8 },
   mapLabel: { fontSize: 12, color: '#666', marginTop: 4 },
