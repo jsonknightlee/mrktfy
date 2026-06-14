@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Modal,
-  Switch, ScrollView, Animated, TouchableWithoutFeedback
+  ScrollView, Animated, TouchableWithoutFeedback
 } from 'react-native';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -50,6 +50,20 @@ const PIN_COLORS = {
 };
 
 const prettyType = (t) => (t === TYPE_RENT ? 'RENTAL' : 'FOR SALE');
+
+const formatFilterPrice = (value, rental = false) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'Any';
+  if (!rental && numeric > 1000000) return '£1m+';
+  if (rental && numeric >= 1000) return `£${(numeric / 1000).toFixed(numeric % 1000 === 0 ? 0 : 1)}k`;
+  if (!rental && numeric >= 1000) return `£${(numeric / 1000).toFixed(numeric % 1000 === 0 ? 0 : 1)}k`;
+  return `£${numeric.toLocaleString()}`;
+};
+
+const formatMinimumRoomLabel = (value) => {
+  if (!value || value === '0') return 'Any';
+  return `${value}+`;
+};
 
 const getStatusTag = (listing) => {
   const status = listing?.Status ?? listing?.status;
@@ -417,6 +431,12 @@ export default function MapScreen() {
     }
   }, [selectedListing]);
 
+  const visibleListingCount = filtersTouched ? filteredListings.length : listings.length;
+  const minPriceLabel = formatFilterPrice(filters.minPrice, isRental);
+  const maxPriceLabel = formatFilterPrice(filters.maxPrice, isRental);
+  const bedsLabel = formatMinimumRoomLabel(filters.beds);
+  const bathsLabel = formatMinimumRoomLabel(filters.baths);
+
   if (!userLocation) {
     return (
       <View style={styles.center}>
@@ -632,67 +652,158 @@ export default function MapScreen() {
       )}
 
       {/* Filter Modal */}
-      <Modal animationType="slide" transparent visible={filterModalVisible}>
+      <Modal animationType="slide" transparent visible={filterModalVisible} onRequestClose={() => setFilterModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.filterModal}>
-            <Text style={styles.modalTitle}>Filter Listings</Text>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Property Type:</Text>
-              <Text style={styles.switchLabel}>{isRental ? 'Rental' : 'Sale'}</Text>
-              <Switch value={isRental} onValueChange={handleToggleType} />
+            <View style={styles.sheetHandle} />
+            <View style={styles.filterHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Find the right fit</Text>
+                <Text style={styles.modalSubtitle}>
+                  {visibleListingCount} {visibleListingCount === 1 ? 'property' : 'properties'} in view
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.closeFilterButton} onPress={() => setFilterModalVisible(false)}>
+                <Ionicons name="close" size={20} color="#475569" />
+              </TouchableOpacity>
             </View>
 
-            <Text style={styles.inputLabel}>Min Price (£)</Text>
-            <WheelPickerExpo
-              key={`min-${pickerMountKey}`}
-              height={150}
-              initialSelectedIndex={minIndexRef.current}
-              items={priceOptions}
-              onChange={({ index, item }) => {
-                minIndexRef.current = index;
-                minValueRef.current = item.value; // ← keep actual value
-              }}
-            />
+            <View style={styles.filterSummaryRow}>
+              <View style={styles.filterSummaryPill}>
+                <Ionicons name="cash-outline" size={15} color={APP_PURPLE} />
+                <Text style={styles.filterSummaryText}>{minPriceLabel} - {maxPriceLabel}</Text>
+              </View>
+              <View style={styles.filterSummaryPill}>
+                <Ionicons name="bed-outline" size={15} color={APP_PURPLE} />
+                <Text style={styles.filterSummaryText}>{bedsLabel} beds</Text>
+              </View>
+              <View style={styles.filterSummaryPill}>
+                <Ionicons name="water-outline" size={15} color={APP_PURPLE} />
+                <Text style={styles.filterSummaryText}>{bathsLabel} baths</Text>
+              </View>
+            </View>
 
-            <Text style={styles.inputLabel}>Max Price (£)</Text>
-            <WheelPickerExpo
-              key={`max-${pickerMountKey}`}
-              height={150}
-              initialSelectedIndex={maxIndexRef.current}
-              items={priceOptions}
-              onChange={({ index, item }) => {
-                maxIndexRef.current = index;
-                maxValueRef.current = item.value; // ← keep actual value
-              }}
-            />
+            <View style={styles.filterContent}>
+              <View style={styles.filterSectionCard}>
+                <Text style={styles.inputLabel}>Search type</Text>
+                <View style={styles.segmentedControl}>
+                  <TouchableOpacity
+                    style={[styles.segmentButton, !isRental && styles.segmentButtonActive]}
+                    onPress={() => handleToggleType(false)}
+                  >
+                    <Ionicons name="home-outline" size={17} color={!isRental ? '#FFFFFF' : '#64748B'} />
+                    <Text style={[styles.segmentButtonText, !isRental && styles.segmentButtonTextActive]}>For sale</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.segmentButton, isRental && styles.segmentButtonActive]}
+                    onPress={() => handleToggleType(true)}
+                  >
+                    <Ionicons name="key-outline" size={17} color={isRental ? '#FFFFFF' : '#64748B'} />
+                    <Text style={[styles.segmentButtonText, isRental && styles.segmentButtonTextActive]}>To rent</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
-            <Text style={styles.inputLabel}>Min Beds</Text>
-            <DropDownPicker
-              placeholder="Select Minimum Beds"
-              open={openBeds}
-              value={filters.beds}
-              items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: `${n}`, value: `${n}`, key: `${n}` }))}
-              setOpen={setOpenBeds}
-              setValue={(cb) => updateFilters({ ...filters, beds: cb(filters.beds) })}
-            />
+              <View style={styles.filterSectionCard}>
+                <View style={styles.sectionTitleRow}>
+                  <Text style={styles.inputLabel}>Price range</Text>
+                  <Text style={styles.sectionValueText}>{minPriceLabel} - {maxPriceLabel}</Text>
+                </View>
+                <View style={styles.pricePickerRow}>
+                  <View style={styles.pricePickerCard}>
+                    <Text style={styles.pickerLabel}>Minimum</Text>
+                    <WheelPickerExpo
+                      key={`min-${pickerMountKey}`}
+                      height={132}
+                      initialSelectedIndex={minIndexRef.current}
+                      items={priceOptions}
+                      onChange={({ index, item }) => {
+                        minIndexRef.current = index;
+                        minValueRef.current = item.value;
+                        if (index > maxIndexRef.current) {
+                          maxIndexRef.current = index;
+                          maxValueRef.current = item.value;
+                          setPickerMountKey((key) => key + 1);
+                        }
+                      }}
+                    />
+                  </View>
+                  <View style={styles.pricePickerCard}>
+                    <Text style={styles.pickerLabel}>Maximum</Text>
+                    <WheelPickerExpo
+                      key={`max-${pickerMountKey}`}
+                      height={132}
+                      initialSelectedIndex={maxIndexRef.current}
+                      items={priceOptions}
+                      onChange={({ index, item }) => {
+                        maxIndexRef.current = index;
+                        maxValueRef.current = item.value;
+                        if (index < minIndexRef.current) {
+                          minIndexRef.current = index;
+                          minValueRef.current = item.value;
+                          setPickerMountKey((key) => key + 1);
+                        }
+                      }}
+                    />
+                  </View>
+                </View>
+              </View>
 
-            <Text style={styles.inputLabel}>Min Baths</Text>
-            <DropDownPicker
-              placeholder="Select Minimum Baths"
-              open={openBaths}
-              value={filters.baths}
-              items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: `${n}`, value: `${n}`, key: `${n}` }))}
-              setOpen={setOpenBaths}
-              setValue={(cb) => updateFilters({ ...filters, baths: cb(filters.baths) })}
-            />
+              <View style={[styles.filterSectionCard, styles.roomSectionCard]}>
+                <Text style={styles.inputLabel}>Minimum rooms</Text>
+                <View style={styles.roomPickerRow}>
+                  <View style={[styles.roomPickerBlock, { zIndex: openBeds ? 3000 : 2000 }]}>
+                    <Text style={styles.pickerLabel}>Bedrooms</Text>
+                    <DropDownPicker
+                      placeholder="Any beds"
+                      open={openBeds}
+                      value={filters.beds}
+                      items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: n === 0 ? 'Any' : `${n}+`, value: `${n}`, key: `beds-${n}` }))}
+                      setOpen={setOpenBeds}
+                      setValue={(cb) => updateFilters({ ...filters, beds: cb(filters.beds) })}
+                      style={styles.dropdown}
+                      dropDownContainerStyle={styles.dropdownMenu}
+                      textStyle={styles.dropdownText}
+                      placeholderStyle={styles.dropdownPlaceholder}
+                      listMode="SCROLLVIEW"
+                    />
+                  </View>
+                  <View style={[styles.roomPickerBlock, { zIndex: openBaths ? 3000 : 1000 }]}>
+                    <Text style={styles.pickerLabel}>Bathrooms</Text>
+                    <DropDownPicker
+                      placeholder="Any baths"
+                      open={openBaths}
+                      value={filters.baths}
+                      items={[0, 1, 2, 3, 4, 5].map((n) => ({ label: n === 0 ? 'Any' : `${n}+`, value: `${n}`, key: `baths-${n}` }))}
+                      setOpen={setOpenBaths}
+                      setValue={(cb) => updateFilters({ ...filters, baths: cb(filters.baths) })}
+                      style={styles.dropdown}
+                      dropDownContainerStyle={styles.dropdownMenu}
+                      textStyle={styles.dropdownText}
+                      placeholderStyle={styles.dropdownPlaceholder}
+                      listMode="SCROLLVIEW"
+                    />
+                  </View>
+                </View>
+              </View>
+            </View>
 
             <View style={styles.modalButtons}>
+              <TouchableOpacity style={[styles.modalBtn, styles.resetBtn].filter(Boolean)} onPress={resetFilters}>
+                <Ionicons name="refresh-outline" size={18} color="#475569" />
+                <Text style={[styles.modalBtnText, styles.resetBtnText]}>Reset</Text>
+              </TouchableOpacity>
               <TouchableOpacity
-                style={styles.modalBtn}
+                style={[styles.modalBtn, styles.applyBtn]}
                 onPress={() => {
                   // Pull the exact values you see on the wheels
-                  const newMin = minValueRef.current ?? filters.minPrice;
-                  const newMax = maxValueRef.current ?? filters.maxPrice;
+                  let nextMinIndex = Math.max(0, priceOptions.findIndex((o) => o.value === (minValueRef.current ?? filters.minPrice)));
+                  let nextMaxIndex = priceOptions.findIndex((o) => o.value === (maxValueRef.current ?? filters.maxPrice));
+                  if (nextMaxIndex < 0) nextMaxIndex = priceOptions.length - 1;
+                  if (nextMinIndex > nextMaxIndex) nextMaxIndex = nextMinIndex;
+
+                  const newMin = priceOptions[nextMinIndex]?.value ?? filters.minPrice;
+                  const newMax = priceOptions[nextMaxIndex]?.value ?? filters.maxPrice;
                   const newFilters = { ...filters, minPrice: newMin, maxPrice: newMax };
 
                   // Persist & apply immediately with fresh values
@@ -701,10 +812,8 @@ export default function MapScreen() {
                   applyFilters(newFilters);
                 }}
               >
-                <Text style={styles.modalBtnText}>Apply</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.resetBtn].filter(Boolean)} onPress={resetFilters}>
-                <Text style={styles.modalBtnText}>Reset</Text>
+                <Text style={styles.modalBtnText}>Show properties</Text>
+                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -897,22 +1006,233 @@ const styles = StyleSheet.create({
   imageRow: { flexDirection: 'row', marginBottom: 8 },
   image: { width: 100, height: 80, marginRight: 8, borderRadius: 8 },
   cardTitle: { fontSize: 16, fontWeight: 'bold' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-start' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    justifyContent: 'flex-end',
+  },
   filterModal: {
-    flexGrow: 1, backgroundColor: 'white', padding: 20, paddingTop: 60,
-    borderBottomLeftRadius: 20, borderBottomRightRadius: 20
+    backgroundColor: '#F8FAFC',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '92%',
+    minHeight: '70%',
+    overflow: 'visible',
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 12,
   },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 },
-  inputLabel: { fontWeight: '600', marginTop: 10, marginBottom: 4 },
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 },
+  sheetHandle: {
+    alignSelf: 'center',
+    backgroundColor: '#CBD5E1',
+    borderRadius: 999,
+    height: 5,
+    marginBottom: 14,
+    width: 46,
+  },
+  filterHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  closeFilterButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  modalTitle: {
+    color: '#0F172A',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  modalSubtitle: {
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  filterSummaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  filterSummaryPill: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  filterSummaryText: {
+    color: '#3730A3',
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 5,
+  },
+  filterContent: {
+    paddingBottom: 14,
+  },
+  filterSectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  roomSectionCard: {
+    zIndex: 20,
+  },
+  sectionTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  sectionValueText: {
+    color: APP_PURPLE,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  inputLabel: {
+    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 10,
+  },
+  segmentedControl: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 14,
+    flexDirection: 'row',
+    padding: 4,
+  },
+  segmentButton: {
+    alignItems: 'center',
+    borderRadius: 11,
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  segmentButtonActive: {
+    backgroundColor: APP_PURPLE,
+    shadowColor: APP_PURPLE,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  segmentButtonText: {
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: '900',
+    marginLeft: 7,
+  },
+  segmentButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  pricePickerRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  pickerLabel: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  pricePickerCard: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    borderWidth: 1,
+    flex: 1,
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingTop: 10,
+  },
+  roomPickerRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  roomPickerBlock: {
+    flex: 1,
+  },
+  dropdown: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    minHeight: 46,
+  },
+  dropdownMenu: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+  },
+  dropdownText: {
+    color: '#0F172A',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  dropdownPlaceholder: {
+    color: '#94A3B8',
+    fontWeight: '800',
+  },
+  modalButtons: {
+    backgroundColor: '#F8FAFC',
+    borderTopColor: '#E2E8F0',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    paddingTop: 12,
+  },
   modalBtn: {
-    backgroundColor: '#007AFF', padding: 12, borderRadius: 8,
-    flex: 1, alignItems: 'center', marginRight: 10
+    alignItems: 'center',
+    borderRadius: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    minHeight: 50,
+    paddingHorizontal: 14,
   },
-  resetBtn: { backgroundColor: '#FF3B30', marginRight: 0, marginLeft: 10 },
-  modalBtnText: { color: 'white', fontWeight: 'bold' },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  switchLabel: { fontSize: 14, fontWeight: '500' },
+  applyBtn: {
+    backgroundColor: APP_PURPLE,
+    flex: 1.45,
+    shadowColor: APP_PURPLE,
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  resetBtn: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CBD5E1',
+    borderWidth: 1,
+    flex: 1,
+  },
+  modalBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+    marginRight: 8,
+  },
+  resetBtnText: {
+    color: '#475569',
+  },
 
   // Subscription Badge
   subscriptionBadge: {

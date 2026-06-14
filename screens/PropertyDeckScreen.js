@@ -38,6 +38,7 @@ import {
 
 const APP_PURPLE = '#6366F1';
 const SWIPE_THRESHOLD = 90;
+const RICH_FILTER_ENRICHMENT_MATCH_LIMIT = 20;
 const FLOW_STEPS = [
   { key: 'detail', label: 'Property Deck' },
   { key: 'shortlist', label: 'Shortlist' },
@@ -62,9 +63,9 @@ const SPECIAL_FILTERS = [
   { key: 'auction', label: 'Auction', terms: ['auction'] },
 ];
 const MUST_HAVE_FILTERS = [
-  { key: 'garden', label: 'Garden', terms: ['garden', 'grounds'], searchScope: 'details' },
-  { key: 'parking', label: 'Parking/garage', terms: ['parking', 'garage', 'driveway', 'off street'] },
-  { key: 'balcony', label: 'Balcony/terrace', terms: ['balcony', 'terrace', 'roof terrace'], searchScope: 'details' },
+  { key: 'garden', label: 'Garden', terms: ['garden', 'gardens', 'grounds', 'outside space', 'rear lawn'], searchScope: 'details' },
+  { key: 'parking', label: 'Parking/garage', terms: ['parking', 'garage', 'garaging', 'driveway', 'drive way', 'off street', 'off-street', 'allocated parking', 'parking space'] },
+  { key: 'balcony', label: 'Balcony/terrace', terms: ['balcony', 'terrace', 'roof terrace', 'patio', 'decking'], searchScope: 'details' },
 ];
 const OWNERSHIP_OPTIONS = [
   { key: 'all', label: 'Show all' },
@@ -185,6 +186,11 @@ const getDisplayListing = (listing) => {
 
 const hasDescriptionText = (listing) => Boolean(listing?.Description || listing?.description);
 
+const deckFiltersNeedRichListingData = (filters) => (
+  Boolean(filters?.mustHaves?.length) ||
+  Boolean(filters?.ownership && filters.ownership !== 'all')
+);
+
 const formatPrice = (price) => {
   if (!price) return 'Price on request';
   if (typeof price === 'number') return `£${price.toLocaleString()}`;
@@ -208,7 +214,9 @@ const parseJsonObject = (value) => {
   if (typeof value === 'object') return value;
 
   try {
-    return JSON.parse(value);
+    const parsed = JSON.parse(value);
+    if (typeof parsed === 'string') return parseJsonObject(parsed);
+    return parsed;
   } catch {
     return null;
   }
@@ -225,36 +233,141 @@ const flattenForSearch = (value) => {
 };
 
 const getListingSearchText = (listing, scope = 'all') => {
-  const additionalInfo = parseJsonObject(listing?.AdditionalInfo || listing?.additionalInfo);
+  const listingPayload = parseJsonObject(
+    listing?.ListingJson ||
+    listing?.listingJson ||
+    listing?.ListingData ||
+    listing?.listingData ||
+    listing?.PropertyJson ||
+    listing?.propertyJson ||
+    listing?.RawListingJson ||
+    listing?.rawListingJson
+  );
+  const nestedListing = listing?.listing || listing?.Listing;
+  const source = {
+    ...(listingPayload || {}),
+    ...(nestedListing || {}),
+    ...(listing || {}),
+  };
+  const additionalInfo = parseJsonObject(
+    source?.AdditionalInfo ||
+    source?.additionalInfo ||
+    source?.additional_info ||
+    source?.AdditionalInformation ||
+    source?.additionalInformation ||
+    source?.additional_information
+  );
   const detailFields = [
-    listing?.Description,
-    listing?.Features,
-    listing?.features,
-    listing?.PropertyTimeline,
-    listing?.NearbyStations,
-    listing?.NearbySchools,
+    source?.Description,
+    source?.description,
+    source?.description_html,
+    source?.Summary,
+    source?.summary,
+    source?.ShortDescription,
+    source?.shortDescription,
+    source?.short_description,
+    source?.Features,
+    source?.features,
+    source?.KeyFeatures,
+    source?.keyFeatures,
+    source?.key_features,
+    source?.BulletPoints,
+    source?.bulletPoints,
+    source?.bullet_points,
+    source?.Highlights,
+    source?.highlights,
+    source?.Amenities,
+    source?.amenities,
+    source?.OutdoorFeatures,
+    source?.outdoorFeatures,
+    source?.outdoor_features,
+    source?.OutsideSpace,
+    source?.outsideSpace,
+    source?.outside_space,
+    source?.Garden,
+    source?.garden,
+    source?.Parking,
+    source?.parking,
+    source?.ParkingDetails,
+    source?.parkingDetails,
+    source?.parking_details,
+    source?.Tenure,
+    source?.tenure,
+    source?.Ownership,
+    source?.ownership,
+    source?.PropertyTimeline,
+    source?.propertyTimeline,
+    source?.property_timeline,
+    source?.NearbyStations,
+    source?.nearbyStations,
+    source?.nearby_stations,
+    source?.NearbySchools,
+    source?.nearbySchools,
+    source?.nearby_schools,
     additionalInfo,
   ];
   const fields = scope === 'details' ? detailFields : [
-    listing?.Title,
-    listing?.Description,
-    listing?.PropertyType,
-    listing?.propertyType,
-    listing?.ListingType,
-    listing?.listingType,
-    listing?.Status,
-    listing?.PropertyStatus,
-    listing?.propertyStatus,
-    listing?.Tenure,
-    listing?.tenure,
-    listing?.Features,
-    listing?.features,
-    listing?.Postcode,
-    listing?.Address,
-    listing?.EPCRating,
-    listing?.PropertyTimeline,
-    listing?.NearbyStations,
-    listing?.NearbySchools,
+    source?.Title,
+    source?.title,
+    source?.Description,
+    source?.description,
+    source?.description_html,
+    source?.PropertyType,
+    source?.propertyType,
+    source?.property_type,
+    source?.ListingType,
+    source?.listingType,
+    source?.listing_type,
+    source?.Status,
+    source?.status,
+    source?.PropertyStatus,
+    source?.propertyStatus,
+    source?.property_status,
+    source?.Tenure,
+    source?.tenure,
+    source?.Ownership,
+    source?.ownership,
+    source?.Features,
+    source?.features,
+    source?.KeyFeatures,
+    source?.keyFeatures,
+    source?.key_features,
+    source?.BulletPoints,
+    source?.bulletPoints,
+    source?.bullet_points,
+    source?.Highlights,
+    source?.highlights,
+    source?.Amenities,
+    source?.amenities,
+    source?.OutdoorFeatures,
+    source?.outdoorFeatures,
+    source?.outdoor_features,
+    source?.OutsideSpace,
+    source?.outsideSpace,
+    source?.outside_space,
+    source?.Garden,
+    source?.garden,
+    source?.Parking,
+    source?.parking,
+    source?.ParkingDetails,
+    source?.parkingDetails,
+    source?.parking_details,
+    source?.Postcode,
+    source?.postcode,
+    source?.Address,
+    source?.address,
+    source?.EPCRating,
+    source?.epcRating,
+    source?.epc_rating,
+    source?.PropertyTimeline,
+    source?.propertyTimeline,
+    source?.property_timeline,
+    source?.NearbyStations,
+    source?.nearbyStations,
+    source?.nearby_stations,
+    source?.NearbySchools,
+    source?.nearbySchools,
+    source?.nearby_schools,
     additionalInfo,
   ];
 
@@ -463,6 +576,9 @@ export default function PropertyDeckScreen({ route }) {
   const pan = useRef(new Animated.ValueXY()).current;
   const isProcessingRef = useRef(false);
   const handledOpenDeckIdRef = useRef(null);
+  const fullListingCacheRef = useRef(new Map());
+  const isEnrichingDeckListingsRef = useRef(false);
+  const lastRichFilterEnrichmentKeyRef = useRef(null);
   const [mode, setMode] = useState('list');
   const [decks, setDecks] = useState([]);
   const [selectedDeckId, setSelectedDeckId] = useState(null);
@@ -564,6 +680,7 @@ export default function PropertyDeckScreen({ route }) {
         : deck
     )));
     setDeckListings(nextListings);
+    lastRichFilterEnrichmentKeyRef.current = null;
     setCurrentIndex(0);
     pan.setValue({ x: 0, y: 0 });
   }, [pan, userProfile]);
@@ -572,6 +689,85 @@ export default function PropertyDeckScreen({ route }) {
     setCurrentIndex(0);
     pan.setValue({ x: 0, y: 0 });
   }, [deckFilters, pan]);
+
+  useEffect(() => {
+    if (
+      !deckFiltersNeedRichListingData(deckFilters) ||
+      !deckListings.length ||
+      filteredDeckListings.length ||
+      isEnrichingDeckListingsRef.current
+    ) {
+      return;
+    }
+
+    const enrichmentKey = [
+      selectedDeckId || 'deck',
+      deckFilters.mustHaves?.join(',') || 'none',
+      deckFilters.ownership || 'all',
+      deckListings.map((listing) => getListingId(listing)).join(','),
+    ].join('|');
+
+    if (lastRichFilterEnrichmentKeyRef.current === enrichmentKey) {
+      return;
+    }
+
+    let isCancelled = false;
+    isEnrichingDeckListingsRef.current = true;
+    lastRichFilterEnrichmentKeyRef.current = enrichmentKey;
+
+    const enrichDeckListings = async () => {
+      const enrichedListings = [...deckListings];
+      let enrichedMatchCount = 0;
+
+      for (let index = 0; index < deckListings.length; index += 1) {
+        if (isCancelled) break;
+
+        const listing = deckListings[index];
+        const listingId = getListingId(listing);
+        if (!listingId) {
+          continue;
+        }
+
+        try {
+          let fullListing = fullListingCacheRef.current.get(listingId);
+          if (!fullListing) {
+            const result = await getListingById(listingId);
+            fullListing = result?.listing || result?.Listing || result;
+            if (fullListing) fullListingCacheRef.current.set(listingId, fullListing);
+          }
+
+          const enrichedListing = getDisplayListing({
+            ...listing,
+            ...(fullListing || {}),
+            propertyDeckListingId: listing.propertyDeckListingId,
+            status: listing.status,
+            distanceMiles: listing.distanceMiles,
+            SearchDistanceMiles: listing.SearchDistanceMiles,
+          });
+
+          enrichedListings[index] = enrichedListing;
+          if (listingPassesDeckFilters(enrichedListing, deckFilters)) {
+            enrichedMatchCount += 1;
+            if (enrichedMatchCount >= RICH_FILTER_ENRICHMENT_MATCH_LIMIT) break;
+          }
+        } catch {
+          enrichedListings[index] = listing;
+        }
+      }
+
+      if (!isCancelled) {
+        setDeckListings(enrichedListings);
+      }
+    };
+
+    enrichDeckListings().finally(() => {
+      isEnrichingDeckListingsRef.current = false;
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [deckFilters, deckListings, filteredDeckListings.length]);
 
   useFocusEffect(
     useCallback(() => {

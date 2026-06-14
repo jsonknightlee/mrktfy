@@ -42,7 +42,9 @@ const parseJsonObject = (value) => {
   if (typeof value === 'object') return value;
 
   try {
-    return JSON.parse(value);
+    const parsed = JSON.parse(value);
+    if (typeof parsed === 'string') return parseJsonObject(parsed);
+    return parsed;
   } catch {
     return null;
   }
@@ -259,7 +261,20 @@ const normalizeDeck = (deck) => {
 };
 
 const normalizeListing = (listing, notification) => {
-  const sourceListing = listing.listing || listing.Listing || listing;
+  const listingPayload = parseJsonObject(
+    listing.listingJson ||
+    listing.ListingJson ||
+    listing.listingData ||
+    listing.ListingData ||
+    listing.propertyJson ||
+    listing.PropertyJson ||
+    listing.rawListingJson ||
+    listing.RawListingJson
+  );
+  const sourceListing = {
+    ...(listingPayload || {}),
+    ...(listing.listing || listing.Listing || listing),
+  };
   const distanceMiles = toNumber(
     listing.distanceMiles ??
     listing.DistanceMiles ??

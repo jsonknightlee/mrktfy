@@ -7,9 +7,9 @@ export const getListingById = async (id) => {
   }
 
   const routes = [
+    `/api/realestate/listings/${listingId}`,
     `/api/listings/${listingId}`,
     `/listings/${listingId}`,
-    `/api/realestate/listings/${listingId}`,
     `/realestate/listings/${listingId}`,
     `/api/realestate/listing/${listingId}`,
     `/realestate/listing/${listingId}`,
@@ -19,20 +19,9 @@ export const getListingById = async (id) => {
   for (const route of routes) {
     try {
       const { data } = await api.get(route);
-      console.log('[LISTING] full listing loaded:', {
-        listingId,
-        route,
-        keys: data && typeof data === 'object' ? Object.keys(data) : [],
-      });
       return data;
     } catch (error) {
       lastError = error;
-      console.log('[LISTING] full listing route failed:', {
-        listingId,
-        route,
-        status: error?.response?.status,
-        message: error?.message,
-      });
     }
   }
 
