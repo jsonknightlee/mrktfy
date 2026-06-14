@@ -458,43 +458,42 @@ export const createPropertyDeckFromListings = async ({ userProfile, limit, listi
     const decks = await getPropertyDecks(userProfile);
     if (decks.length >= limit) return decks;
 
-    const deckListingsPayload = listings.map((listing, index) => {
-      const listingWithDistance = withSearchDistance(listing, filterJson);
+    const listingIds = [];
+    const seenListingIds = new Set();
+    listings.forEach((listing) => {
       const listingId = getListingId(listing);
-
-      return {
-        listingId,
-        ListingID: listingId,
-        distanceMiles: listingWithDistance.distanceMiles,
-        DistanceMiles: listingWithDistance.distanceMiles,
-        searchDistanceMiles: listingWithDistance.SearchDistanceMiles,
-        SearchDistanceMiles: listingWithDistance.SearchDistanceMiles,
-        rank: index + 1,
-        Rank: index + 1,
-        status: 'matched',
-        Status: 'matched',
-      };
-    }).filter((listing) => listing.listingId);
+      if (listingId && !seenListingIds.has(listingId)) {
+        seenListingIds.add(listingId);
+        listingIds.push(listingId);
+      }
+    });
 
     console.log('[PROPERTY-DECK] creating deck from map listings:', {
       listingCount: listings.length,
-      payloadListingCount: deckListingsPayload.length,
-      firstListingId: deckListingsPayload[0]?.listingId,
-      firstListingKeys: listings[0] ? Object.keys(listings[0]) : [],
+      payloadListingCount: listingIds.length,
+      firstListingId: listingIds[0],
+      payloadMode: 'listingIds',
     });
 
     const { data } = await api.post('/api/property-decks/from-listings', {
       name: name || generatePropertyDeckName(userProfile, decks.length + 1),
       filterJson,
-      listingIds: deckListingsPayload.map((listing) => listing.listingId),
-      listings: deckListingsPayload,
+      listingIds,
+      listings: listingIds.map((listingId, index) => ({
+        listingId,
+        ListingID: listingId,
+        rank: index + 1,
+        Rank: index + 1,
+        status: 'matched',
+        Status: 'matched',
+      })),
     });
 
     const createdDeck = normalizeDeck(data?.deck || data);
-    if (deckListingsPayload.length && !Number(createdDeck.deckListingCount || 0)) {
+    if (listingIds.length && !Number(createdDeck.deckListingCount || 0)) {
       console.log('[PROPERTY-DECK] backend created deck but returned zero deck listings:', {
         deckId: createdDeck.id,
-        sentListingCount: deckListingsPayload.length,
+        sentListingCount: listingIds.length,
         response: data,
       });
     }

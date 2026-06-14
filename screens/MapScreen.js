@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Modal,
-  ScrollView, Animated, TouchableWithoutFeedback
+  ScrollView, Animated, TouchableWithoutFeedback, TextInput
 } from 'react-native';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -37,7 +37,9 @@ const formatLastViewed = (iso) => new Date(iso).toLocaleDateString();
 const { API_BASE_URL, API_KEY} = Constants.expoConfig.extra;
 const FILTER_STORAGE_KEY = 'mrktfy-filters';
 const TYPE_STORAGE_KEY = 'mrktfy-property-type';
+const SEARCH_LOCATION_STORAGE_KEY = 'mrktfy-map-search-location';
 const TOAST_DURATION_MS = 20000; // 20s
+const MAP_LISTING_LIMIT = 2000;
 
 const TYPE_RENT = 'to-rent';
 const TYPE_SALE = 'for-sale';
@@ -73,6 +75,13 @@ const getStatusTag = (listing) => {
   return trimmed.length ? trimmed : null;
 };
 
+const canUseSearchLocation = (tier) => ['investor', 'developer'].includes(String(tier || '').toLowerCase());
+
+const getSearchLocationLabel = (location) => {
+  if (!location) return 'Current location';
+  return location.label || location.query || 'Search location';
+};
+
 export default function MapScreen() {
   const [userLocation, setUserLocation] = useState(null);
   const [listings, setListings] = useState([]);
@@ -86,6 +95,10 @@ export default function MapScreen() {
   const [isRental, setIsRental] = useState(false);
   const [openBeds, setOpenBeds] = useState(null);
   const [openBaths, setOpenBaths] = useState(null);
+  const [searchLocation, setSearchLocation] = useState(null);
+  const [searchLocationInputVisible, setSearchLocationInputVisible] = useState(false);
+  const [searchLocationQuery, setSearchLocationQuery] = useState('');
+  const [searchingLocation, setSearchingLocation] = useState(false);
 
   // Wheel state (we avoid re-render during scroll)
   const minIndexRef = useRef(0);
@@ -143,6 +156,11 @@ export default function MapScreen() {
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
   const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, loading, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus, userProfile } = useSubscription();
   const navigation = useNavigation();
+  const searchLocationEnabled = canUseSearchLocation(currentTier);
+  const activeSearchLocation = searchLocationEnabled && searchLocation ? searchLocation : userLocation;
+  const activeSearchLocationLabel = searchLocationEnabled && searchLocation
+    ? getSearchLocationLabel(searchLocation)
+    : 'Current location';
 
   const getListingPinColor = (listing) => {
     const status = getFavoriteStatus(listing.ID);
@@ -192,6 +210,35 @@ export default function MapScreen() {
       AsyncStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(updated));
       return updated;
     });
+  };
+
+  const loadListingsForLocation = async (location, type = isRental ? TYPE_RENT : TYPE_SALE) => {
+    if (!location?.latitude || !location?.longitude) return;
+
+    setSelectedListing(null);
+    setListings([]);
+    setFilteredListings([]);
+
+    try {
+      const searchRadius = getMaxSearchRadius();
+      console.log(`🔍 Using search radius: ${searchRadius}km for ${currentTier} tier`);
+      const nearby = await fetchNearbyListings(location.latitude, location.longitude, searchRadius, type, MAP_LISTING_LIMIT);
+      setListings(nearby);
+
+      if (nearby.length === 0) {
+        showToast(`No listings found near ${getSearchLocationLabel(location)}.`);
+      }
+    } catch (err) {
+      console.error('Failed to fetch listings:', err);
+      try {
+        const searchRadius = getMaxSearchRadius();
+        const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, type, MAP_LISTING_LIMIT);
+        setListings(londonNearby);
+        console.log('Error fallback to London, found:', londonNearby.length, 'listings');
+      } catch (fallbackErr) {
+        console.error('London fallback also failed:', fallbackErr);
+      }
+    }
   };
 
   // Load saved filters & type
@@ -252,7 +299,7 @@ export default function MapScreen() {
     }
   }, [filterModalVisible, priceOptions, filters.minPrice, filters.maxPrice]);
 
-  // fetch listings by type
+  // fetch listings by type and active search location
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -262,34 +309,90 @@ export default function MapScreen() {
       }
       const loc = await Location.getCurrentPositionAsync({});
       const { latitude, longitude } = loc.coords;
-      setUserLocation({ latitude, longitude });
+      const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
+      setUserLocation(nextUserLocation);
 
-      try {
-        const searchRadius = getMaxSearchRadius();
-        console.log(`🔍 Using search radius: ${searchRadius}km for ${currentTier} tier`);
-        const nearby = await fetchNearbyListings(latitude, longitude, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
-        setListings(nearby);
-        
-        if (nearby.length === 0) {
-          console.log(' No listings found at current location, falling back to London...');
-          const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
-          setListings(londonNearby);
-          console.log(' Using London listings, found:', londonNearby.length, 'listings');
-        }
-      } catch (err) {
-        console.error('Failed to fetch listings:', err);
+      let savedSearchLocation = null;
+      if (canUseSearchLocation(currentTier)) {
         try {
-          const searchRadius = getMaxSearchRadius();
-          const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, isRental ? TYPE_RENT : TYPE_SALE);
-          setListings(londonNearby);
-          // Don't change userLocation - keep GPS location for the circle
-          console.log('Error fallback to London, found:', londonNearby.length, 'listings');
-        } catch (fallbackErr) {
-          console.error('London fallback also failed:', fallbackErr);
+          const savedValue = await AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY);
+          savedSearchLocation = savedValue ? JSON.parse(savedValue) : null;
+        } catch {}
+      } else {
+        await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
+        setSearchLocation(null);
+        setSearchLocationInputVisible(false);
+      }
+
+      if (savedSearchLocation?.latitude && savedSearchLocation?.longitude) {
+        setSearchLocation(savedSearchLocation);
+        if (!searchLocationQuery) {
+          setSearchLocationQuery(savedSearchLocation.query || savedSearchLocation.label || '');
         }
       }
+
+      const locationForSearch = savedSearchLocation?.latitude && canUseSearchLocation(currentTier)
+        ? savedSearchLocation
+        : nextUserLocation;
+
+      await loadListingsForLocation(locationForSearch, isRental ? TYPE_RENT : TYPE_SALE);
     })();
   }, [isRental, currentTier]);
+
+  useEffect(() => {
+    if (!userLocation || !searchLocationEnabled || searchLocation) return;
+    setSearchLocationInputVisible(false);
+  }, [searchLocation, searchLocationEnabled, userLocation]);
+
+  const submitSearchLocation = async () => {
+    if (!searchLocationEnabled) return;
+
+    const query = searchLocationQuery.trim();
+    if (!query) {
+      showToast('Enter an address or postcode to search from.');
+      return;
+    }
+
+    setSearchingLocation(true);
+    try {
+      const geocodeResults = await Location.geocodeAsync(query);
+      const result = geocodeResults?.[0];
+      if (!result) {
+        showToast('No location found. Try a fuller address or postcode.');
+        return;
+      }
+
+      const nextSearchLocation = {
+        latitude: result.latitude,
+        longitude: result.longitude,
+        label: query,
+        query,
+        source: 'search',
+        savedAt: new Date().toISOString(),
+      };
+
+      setSelectedListing(null);
+      setSearchLocation(nextSearchLocation);
+      setSearchLocationInputVisible(false);
+      await AsyncStorage.setItem(SEARCH_LOCATION_STORAGE_KEY, JSON.stringify(nextSearchLocation));
+      await loadListingsForLocation(nextSearchLocation, isRental ? TYPE_RENT : TYPE_SALE);
+    } catch (err) {
+      console.error('Search location failed:', err);
+      showToast('Could not search that location. Try again.');
+    } finally {
+      setSearchingLocation(false);
+    }
+  };
+
+  const useCurrentLocationForSearch = async () => {
+    if (!userLocation) return;
+    setSelectedListing(null);
+    setSearchLocation(null);
+    setSearchLocationInputVisible(false);
+    setSearchLocationQuery('');
+    await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
+    await loadListingsForLocation(userLocation, isRental ? TYPE_RENT : TYPE_SALE);
+  };
 
   // re-apply when (new) listings arrive
   useEffect(() => {
@@ -360,9 +463,9 @@ export default function MapScreen() {
       return;
     }
 
-    const sourceListings = listings;
+    const sourceListings = filtersTouched ? filteredListings : listings;
     if (!sourceListings.length) {
-      showToast('No properties in the current radius to add to a deck.');
+      showToast('No properties in the current map view to add to a deck.');
       return;
     }
 
@@ -373,6 +476,7 @@ export default function MapScreen() {
     }
 
     const searchRadiusKm = getMaxSearchRadius();
+    const deckSearchLocation = activeSearchLocation || userLocation;
     const filterJson = {
       listingType: isRental ? TYPE_RENT : TYPE_SALE,
       radiusKm: searchRadiusKm,
@@ -380,8 +484,11 @@ export default function MapScreen() {
       maxPrice: filters.maxPrice,
       beds: filters.beds || null,
       baths: filters.baths || null,
-      latitude: userLocation?.latitude || null,
-      longitude: userLocation?.longitude || null,
+      latitude: deckSearchLocation?.latitude || null,
+      longitude: deckSearchLocation?.longitude || null,
+      searchLocationLabel: activeSearchLocationLabel,
+      searchLocationSource: searchLocationEnabled && searchLocation ? 'search' : 'user',
+      searchLocationQuery: searchLocationEnabled && searchLocation ? searchLocation.query || searchLocation.label || null : null,
     };
 
     let deckCreationResult;
@@ -466,6 +573,54 @@ export default function MapScreen() {
         <Ionicons name="filter" size={24} color="black" />
       </TouchableOpacity>
 
+      {searchLocationEnabled && (
+        <View style={styles.searchLocationPanel}>
+          {searchLocationInputVisible ? (
+            <View style={styles.searchLocationInputRow}>
+              <Ionicons name="search" size={18} color="#64748B" />
+              <TextInput
+                style={styles.searchLocationInput}
+                value={searchLocationQuery}
+                onChangeText={setSearchLocationQuery}
+                placeholder="Enter address or postcode"
+                placeholderTextColor="#94A3B8"
+                returnKeyType="search"
+                autoCapitalize="words"
+                onSubmitEditing={submitSearchLocation}
+              />
+              <TouchableOpacity
+                style={[styles.searchLocationSubmit, searchingLocation && styles.searchLocationSubmitDisabled]}
+                onPress={submitSearchLocation}
+                disabled={searchingLocation}
+              >
+                <Ionicons name={searchingLocation ? 'hourglass-outline' : 'arrow-forward'} size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.searchLocationClose} onPress={() => setSearchLocationInputVisible(false)}>
+                <Ionicons name="close" size={18} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.searchLocationCollapsedRow}>
+              <TouchableOpacity
+                style={styles.searchLocationButton}
+                onPress={() => setSearchLocationInputVisible(true)}
+                activeOpacity={0.9}
+              >
+                <Ionicons name="location-outline" size={17} color={APP_PURPLE} />
+                <Text style={styles.searchLocationButtonText} numberOfLines={1}>
+                  {searchLocation ? activeSearchLocationLabel : 'Search location'}
+                </Text>
+              </TouchableOpacity>
+              {searchLocation ? (
+                <TouchableOpacity style={styles.currentLocationButton} onPress={useCurrentLocationForSearch}>
+                  <Ionicons name="navigate-outline" size={16} color="#475569" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
+        </View>
+      )}
+
       <TouchableOpacity style={styles.createDeckOuter} onPress={handleCreatePropertyDeck} activeOpacity={0.9}>
         <Animated.View
           pointerEvents="none"
@@ -502,11 +657,12 @@ export default function MapScreen() {
 
       {mapVisible && (
         <MapView
+          key={`${activeSearchLocation?.latitude || userLocation.latitude}-${activeSearchLocation?.longitude || userLocation.longitude}`}
           style={styles.map}
           showsUserLocation
           initialRegion={{
-            latitude: userLocation.latitude,
-            longitude: userLocation.longitude,
+            latitude: activeSearchLocation?.latitude || userLocation.latitude,
+            longitude: activeSearchLocation?.longitude || userLocation.longitude,
             latitudeDelta: 0.05,
             longitudeDelta: 0.05,
           }}
@@ -520,11 +676,11 @@ export default function MapScreen() {
           }}
         >
           {/* User Radius Circle */}
-          {userLocation && (
+          {activeSearchLocation && (
             <Circle
               center={{
-                latitude: userLocation.latitude,
-                longitude: userLocation.longitude,
+                latitude: activeSearchLocation.latitude,
+                longitude: activeSearchLocation.longitude,
               }}
               radius={getMaxSearchRadius() * 1000} // Convert km to meters
               strokeColor="rgba(0, 200, 255, 0.8)"
@@ -913,6 +1069,93 @@ const styles = StyleSheet.create({
   filterBtn: {
     position: 'absolute', top: 50, left: 20, zIndex: 10,
     backgroundColor: 'white', padding: 10, borderRadius: 20, elevation: 3
+  },
+  searchLocationPanel: {
+    left: 20,
+    position: 'absolute',
+    right: 20,
+    top: 104,
+    zIndex: 12,
+  },
+  searchLocationCollapsedRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  searchLocationButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 22,
+    borderWidth: 1,
+    elevation: 4,
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 44,
+    paddingHorizontal: 13,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+  },
+  searchLocationButtonText: {
+    color: '#111827',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 7,
+  },
+  currentLocationButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 20,
+    borderWidth: 1,
+    elevation: 4,
+    height: 40,
+    justifyContent: 'center',
+    marginLeft: 8,
+    width: 40,
+  },
+  searchLocationInputRow: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 22,
+    borderWidth: 1,
+    elevation: 5,
+    flexDirection: 'row',
+    minHeight: 46,
+    paddingLeft: 13,
+    paddingRight: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.14,
+    shadowRadius: 7,
+  },
+  searchLocationInput: {
+    color: '#111827',
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    minHeight: 44,
+    paddingHorizontal: 8,
+  },
+  searchLocationSubmit: {
+    alignItems: 'center',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 17,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  searchLocationSubmitDisabled: {
+    backgroundColor: '#A5B4FC',
+  },
+  searchLocationClose: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    width: 34,
   },
   createDeckOuter: {
     position: 'absolute',

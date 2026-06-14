@@ -102,6 +102,7 @@ const ADDED_OPTIONS = [
   { key: '14d', label: 'Last 14 days', days: 14 },
   { key: '30d', label: 'Last 30 days', days: 30 },
 ];
+const SHOW_DATE_ADDED_FILTER = false;
 const createDefaultDeckFilters = () => ({
   propertyType: 'all',
   special: SPECIAL_FILTERS.reduce((acc, item) => ({ ...acc, [item.key]: 'include' }), {}),
@@ -190,6 +191,17 @@ const deckFiltersNeedRichListingData = (filters) => (
   Boolean(filters?.mustHaves?.length) ||
   Boolean(filters?.ownership && filters.ownership !== 'all')
 );
+
+const getDeckSearchLocationLabel = (deck) => {
+  const filterJson = parseJsonObject(deck?.filterJson || deck?.FilterJson);
+  const label = filterJson?.searchLocationLabel || filterJson?.SearchLocationLabel;
+  const query = filterJson?.searchLocationQuery || filterJson?.SearchLocationQuery;
+  const source = filterJson?.searchLocationSource || filterJson?.SearchLocationSource;
+  if (label) return label;
+  if (query) return query;
+  if (source === 'user') return 'Current location';
+  return null;
+};
 
 const formatPrice = (price) => {
   if (!price) return 'Price on request';
@@ -431,7 +443,7 @@ const listingPassesDeckFilters = (listing, filters) => {
   const feature = FEATURE_OPTIONS.find((item) => item.key === filters.feature);
   if (feature?.key !== 'all' && !matchesTerms(listing, feature?.terms)) return false;
 
-  const added = ADDED_OPTIONS.find((item) => item.key === filters.added);
+  const added = SHOW_DATE_ADDED_FILTER ? ADDED_OPTIONS.find((item) => item.key === filters.added) : null;
   if (added?.days) {
     const listingDate = getListingDate(listing);
     if (!listingDate) return false;
@@ -1715,7 +1727,11 @@ export default function PropertyDeckScreen({ route }) {
             {selectedDeck?.name || 'Property Deck'}
           </Text>
           <Text style={styles.subtitle}>
-            {filteredDeckListings.length} of {deckListings.length} listings / swipe left to remove, right to shortlist.
+            {[
+              getDeckSearchLocationLabel(selectedDeck),
+              `${filteredDeckListings.length} of ${deckListings.length} listings`,
+              'swipe left to remove, right to shortlist',
+            ].filter(Boolean).join(' / ')}
           </Text>
         </View>
         <TouchableOpacity style={styles.headerFilterButton} onPress={() => setFilterModalVisible(true)}>
@@ -1940,8 +1956,8 @@ export default function PropertyDeckScreen({ route }) {
               renderChoiceChips(FEATURE_OPTIONS, deckFilters.feature, (key) => setDeckFilterValue('feature', key))
             )}
 
-            {renderFilterSection(
-              'Added to Zoopla',
+            {SHOW_DATE_ADDED_FILTER && renderFilterSection(
+              'Date added',
               renderChoiceChips(ADDED_OPTIONS, deckFilters.added, (key) => setDeckFilterValue('added', key))
             )}
           </ScrollView>

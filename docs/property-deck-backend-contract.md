@@ -845,17 +845,16 @@ Request:
     "beds": null,
     "baths": null,
     "latitude": 51.5,
-    "longitude": -0.12
+    "longitude": -0.12,
+    "searchLocationLabel": "SW1A 1AA",
+    "searchLocationSource": "search",
+    "searchLocationQuery": "SW1A 1AA"
   },
   "listingIds": ["5501"],
   "listings": [
     {
       "listingId": "5501",
       "ListingID": "5501",
-      "distanceMiles": 0.5,
-      "DistanceMiles": 0.5,
-      "searchDistanceMiles": 0.5,
-      "SearchDistanceMiles": 0.5,
       "rank": 1,
       "Rank": 1,
       "status": "matched",
@@ -865,7 +864,9 @@ Request:
 }
 ```
 
-The backend should use `listings[].listingId` or `listings[].ListingID` as the source of `PropertyDeckListing.ListingID`. The `listingIds` array is a convenience duplicate for simpler insert loops. Do not require full listing objects in this bulk request; the payload can contain 100+ map listings and should stay small.
+`searchLocationSource` is `user` for the device/current location flow and `search` when an Investor or Developer user enters an address/postcode on the MapView. Buyer/Prospector users should not be offered arbitrary map location search in the frontend. Store these values inside `PropertyDeck.FilterJson` so the Property Deck can display where the deck was created from.
+
+The backend should treat `listingIds` or `listings[].listingId` as the source of `PropertyDeckListing.ListingID`. Do not require full listing objects in this bulk request. High-traffic map searches can produce 2000 IDs, so the frontend intentionally sends a compact listings array containing IDs, rank, and status only to avoid `PayloadTooLargeError` from Express/body-parser limits.
 
 Required behavior:
 

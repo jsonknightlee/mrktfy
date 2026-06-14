@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import {
   createDecisionBoard,
   getDecisionBoards,
 } from '../services/DecisionBoardService';
+import { getListingById } from '../services/listingApi';
 
 const APP_PURPLE = '#6366F1';
 
@@ -57,19 +58,53 @@ const getListingPrice = (listing) => listing?.Price || listing?.price || '';
 const getListingImageValue = (listing) => (
   listing?.ImageUrls ||
   listing?.imageUrls ||
+  listing?.image_urls ||
   listing?.Images ||
   listing?.images ||
   listing?.ImageUrl ||
   listing?.imageUrl ||
+  listing?.image_url ||
   listing?.PrimaryImageUrl ||
   listing?.primaryImageUrl ||
+  listing?.primary_image_url ||
   listing?.MainImageUrl ||
   listing?.mainImageUrl ||
+  listing?.main_image_url ||
   listing?.PhotoUrl ||
   listing?.photoUrl ||
+  listing?.photo_url ||
   listing?.ThumbnailUrl ||
-  listing?.thumbnailUrl
+  listing?.thumbnailUrl ||
+  listing?.thumbnail_url
 );
+
+const getBoardListingPreview = (boardListing) => (
+  boardListing?.listing ||
+  boardListing?.Listing ||
+  boardListing?.property ||
+  boardListing?.Property ||
+  boardListing ||
+  null
+);
+
+const getBoardListingId = (boardListing) => {
+  const listing = getBoardListingPreview(boardListing);
+  return boardListing?.listingId || boardListing?.ListingID || getListingId(listing);
+};
+
+const getBoardListingPreviewWithCache = (boardListing, cache) => {
+  const listing = getBoardListingPreview(boardListing);
+  const listingId = getBoardListingId(boardListing);
+  const cachedListing = listingId ? cache?.get(String(listingId)) : null;
+
+  if (!cachedListing) return listing;
+
+  return {
+    ...(listing || {}),
+    ...cachedListing,
+    ID: String(listingId),
+  };
+};
 
 const getBoardLight = (board) => {
   if (board.status === 'Closed') return { color: '#EF4444', label: 'Closed' };
@@ -79,6 +114,7 @@ const getBoardLight = (board) => {
 
 export default function DecisionBoardListScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const listingPreviewCacheRef = useRef(new Map());
   const pendingListing = route.params?.pendingListing || null;
   const pendingSource = route.params?.pendingSource || {};
   const [boards, setBoards] = useState([]);
@@ -93,16 +129,82 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     [pendingListing]
   );
 
+  const boardPreviewSignature = useMemo(() => (
+    boards.map((board) => {
+      const previewIds = (board.listings || [])
+        .slice(0, 4)
+        .map((boardListing) => getBoardListingId(boardListing) || '')
+        .join(',');
+      return `${board.id || ''}:${previewIds}`;
+    }).join('|')
+  ), [boards]);
+
   const loadBoards = useCallback(async () => {
     setLoading(true);
     try {
-      setBoards(await getDecisionBoards());
+      const nextBoards = await getDecisionBoards();
+      setBoards(nextBoards);
     } catch (error) {
       Alert.alert('DecisionBoards unavailable', error?.response?.data?.error || error?.message || 'Could not load DecisionBoards.');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!boards.length) return;
+
+    let isCancelled = false;
+
+    const enrichBoardPreviews = async () => {
+      const nextBoards = await Promise.all(boards.map(async (board) => {
+        const listings = board.listings || [];
+        let changed = false;
+        const nextListings = [...listings];
+
+        for (let index = 0; index < Math.min(listings.length, 4); index += 1) {
+          const boardListing = listings[index];
+          const listing = getBoardListingPreviewWithCache(boardListing, listingPreviewCacheRef.current);
+          const existingImage = normalizeImageUrls(getListingImageValue(listing))[0];
+          const listingId = getBoardListingId(boardListing);
+
+          if (existingImage || !listingId) continue;
+
+          try {
+            let fullListing = listingPreviewCacheRef.current.get(String(listingId));
+            if (!fullListing) {
+              const result = await getListingById(listingId);
+              fullListing = result?.listing || result?.Listing || result;
+              if (fullListing) listingPreviewCacheRef.current.set(String(listingId), fullListing);
+            }
+
+            if (fullListing) {
+              nextListings[index] = {
+                ...boardListing,
+                listing: {
+                  ...(boardListing?.Listing || {}),
+                  ...(boardListing?.listing || {}),
+                  ...fullListing,
+                  ID: String(listingId),
+                },
+              };
+              changed = true;
+            }
+          } catch {}
+        }
+
+        return changed ? { ...board, listings: nextListings } : board;
+      }));
+
+      if (!isCancelled) setBoards(nextBoards);
+    };
+
+    enrichBoardPreviews();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [boardPreviewSignature]);
 
   useFocusEffect(useCallback(() => {
     loadBoards();
@@ -210,7 +312,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
           </View>
           <View style={styles.propertyPreviewRow}>
             {(item.listings || []).slice(0, 4).map((boardListing, index) => {
-              const listing = boardListing.listing || boardListing;
+              const listing = getBoardListingPreviewWithCache(boardListing, listingPreviewCacheRef.current);
               const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
               return imageUrl ? (
                 <Image key={boardListing.id || `${item.id}-${index}`} source={{ uri: imageUrl }} style={styles.previewThumb} />

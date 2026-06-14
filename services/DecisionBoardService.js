@@ -50,18 +50,24 @@ const normalizeListing = (listing) => {
   const imageUrls = getValue(listing, [
     'ImageUrls',
     'imageUrls',
+    'image_urls',
     'Images',
     'images',
     'ImageUrl',
     'imageUrl',
+    'image_url',
     'PrimaryImageUrl',
     'primaryImageUrl',
+    'primary_image_url',
     'MainImageUrl',
     'mainImageUrl',
+    'main_image_url',
     'PhotoUrl',
     'photoUrl',
+    'photo_url',
     'ThumbnailUrl',
     'thumbnailUrl',
+    'thumbnail_url',
   ], []);
 
   return {
