@@ -23,7 +23,6 @@ import VirtualTourModal from '../components/VirtualTourModal';
 import PropertyTimeline from '../components/PropertyTimeline';
 import CollapsibleInfoSection from '../components/CollapsibleInfoSection';
 import AdModal from '../components/AdModal';
-import { addListingToDecisionBoardProject } from '../services/DecisionBoardService';
 
 const { width } = Dimensions.get('window');
 const MODAL_HEIGHT = Dimensions.get("window").height * 0.9;
@@ -98,7 +97,6 @@ export default function ListingDetailScreen({ route, navigation }) {
 
   const [virtualTourModalVisible, setVirtualTourModalVisible] = useState(false);
   const [floorPlanModalVisible, setFloorPlanModalVisible] = useState(false);
-  const [creatingDecisionBoard, setCreatingDecisionBoard] = useState(false);
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
   const { currentTier, shouldShowAd } = useSubscription();
   const isFavorited = getFavoriteStatus(listing.ID)?.isFavorited ?? !!route.params.listing?.isFavorited;
@@ -183,27 +181,15 @@ useEffect(() => {
 
   const openDecisionBoard = async () => {
     const listingId = getListingId(listing);
-    if (!listingId || creatingDecisionBoard) return;
+    if (!listingId) return;
 
-    setCreatingDecisionBoard(true);
-    try {
-      const decisionBoard = await addListingToDecisionBoardProject({
-        listingId,
-        boardName: 'Property Decisions',
-      });
-
-      navigation.navigate('DecisionBoard', {
-        decisionBoardId: decisionBoard?.id,
-        decisionBoard,
-      });
-    } catch (error) {
-      Alert.alert(
-        'Could not open Decision Board',
-        error?.response?.data?.error || error?.response?.data?.message || error?.message || 'This property could not be added to a Decision Board.'
-      );
-    } finally {
-      setCreatingDecisionBoard(false);
-    }
+    navigation.navigate('DecisionBoards', {
+      pendingListing: listing,
+      pendingSource: {
+        sourceFlow: 'listingDetail',
+        suggestedBoardName: 'Property Decisions',
+      },
+    });
   };
 
   const generateVirtualTourUrl = () => {
@@ -323,14 +309,11 @@ useEffect(() => {
         <Text style={styles.description}>{String(listing.Description || '')}</Text>
 
         <TouchableOpacity
-          style={[styles.decisionButton, creatingDecisionBoard && styles.decisionButtonDisabled]}
+          style={styles.decisionButton}
           onPress={openDecisionBoard}
-          disabled={creatingDecisionBoard}
         >
-          <Ionicons name="flag-outline" size={20} color={creatingDecisionBoard ? '#94A3B8' : '#fff'} />
-          <Text style={[styles.decisionButtonText, creatingDecisionBoard && styles.decisionButtonTextDisabled]}>
-            {creatingDecisionBoard ? 'Opening Decision Board...' : 'Pursue in Decision Board'}
-          </Text>
+          <Ionicons name="flag-outline" size={20} color="#fff" />
+          <Text style={styles.decisionButtonText}>Pursue in Decision Board</Text>
         </TouchableOpacity>
 
         {/* Mini Map */}

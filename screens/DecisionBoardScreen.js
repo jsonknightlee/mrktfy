@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,14 +12,19 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   addDecisionBoardAgent,
   addDecisionBoardBroker,
   BOARD_STATUSES,
   BROKER_STATUSES,
+  deleteDecisionBoardAgent,
+  deleteDecisionBoardBroker,
   getDecisionBoard,
   updateDecisionBoard,
+  updateDecisionBoardAgent,
+  updateDecisionBoardBroker,
   updateDecisionBoardListing,
 } from '../services/DecisionBoardService';
 
@@ -34,6 +40,15 @@ const TRAFFIC_LIGHT = {
   Green: { color: '#22C55E', label: 'Active' },
   Orange: { color: '#F97316', label: 'Tentative' },
   Red: { color: '#EF4444', label: 'Closed' },
+};
+
+const EMPTY_CONTACT_FORM = {
+  name: '',
+  company: '',
+  phone: '',
+  email: '',
+  address: '',
+  notes: '',
 };
 
 const normalizeImageUrls = (value) => {
@@ -75,6 +90,8 @@ const getListingImageValue = (listing) => (
   listing?.thumbnailUrl
 );
 const statusToTrafficLight = (status) => (status === 'Closed' ? 'Red' : status === 'Tentative' ? 'Orange' : 'Green');
+const getBoardAgentId = (agent) => String(agent?.decisionBoardAgentId || agent?.DecisionBoardAgentID || agent?.id || '');
+const getBoardBrokerId = (broker) => String(broker?.decisionBoardBrokerId || broker?.DecisionBoardBrokerID || broker?.id || '');
 
 export default function DecisionBoardScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
@@ -83,10 +100,8 @@ export default function DecisionBoardScreen({ route, navigation }) {
   const [board, setBoard] = useState(initialBoard);
   const [loading, setLoading] = useState(!initialBoard);
   const [saving, setSaving] = useState(false);
-  const [agentName, setAgentName] = useState('');
-  const [agentCompany, setAgentCompany] = useState('');
-  const [brokerName, setBrokerName] = useState('');
-  const [brokerCompany, setBrokerCompany] = useState('');
+  const [contactModal, setContactModal] = useState({ visible: false, type: 'agent', item: null });
+  const [contactForm, setContactForm] = useState(EMPTY_CONTACT_FORM);
 
   const listings = board?.listings || [];
   const activeCount = listings.filter((item) => item.listingStatus !== 'Closed').length;
@@ -99,6 +114,10 @@ export default function DecisionBoardScreen({ route, navigation }) {
       return acc;
     }, { Green: 0, Orange: 0, Red: 0 })
   ), [listings]);
+
+  const contactModalTitle = contactModal.type === 'agent'
+    ? `${contactModal.item ? 'Edit' : 'Add'} agent`
+    : `${contactModal.item ? 'Edit' : 'Add'} broker`;
 
   const loadBoard = useCallback(async () => {
     if (!decisionBoardId) return;
@@ -116,6 +135,10 @@ export default function DecisionBoardScreen({ route, navigation }) {
   useEffect(() => {
     loadBoard();
   }, [loadBoard]);
+
+  useFocusEffect(useCallback(() => {
+    loadBoard();
+  }, [loadBoard]));
 
   const setBoardStatus = async (status) => {
     if (!board?.id) return;
@@ -149,45 +172,146 @@ export default function DecisionBoardScreen({ route, navigation }) {
     }
   };
 
-  const addAgent = async () => {
-    const trimmedName = agentName.trim();
-    if (!board?.id || !trimmedName) return;
+  const openContactModal = (type, item = null) => {
+    setContactForm({
+      name: type === 'agent' ? item?.agentName || '' : item?.brokerName || '',
+      company: item?.companyName || '',
+      phone: item?.phone || '',
+      email: item?.email || '',
+      address: item?.address || '',
+      notes: item?.notes || '',
+    });
+    setContactModal({ visible: true, type, item });
+  };
+
+  const closeContactModal = () => {
+    setContactModal({ visible: false, type: 'agent', item: null });
+    setContactForm(EMPTY_CONTACT_FORM);
+  };
+
+  const saveContact = async () => {
+    const trimmedName = contactForm.name.trim();
+    if (!board?.id || !trimmedName || saving) return;
+
+    const payload = {
+      companyName: contactForm.company.trim(),
+      phone: contactForm.phone.trim(),
+      email: contactForm.email.trim(),
+      address: contactForm.address.trim(),
+      notes: contactForm.notes.trim(),
+    };
 
     setSaving(true);
     try {
-      const agent = await addDecisionBoardAgent(board.id, {
-        agentName: trimmedName,
-        companyName: agentCompany.trim(),
-      });
-      setBoard((current) => ({ ...current, agents: [agent, ...(current?.agents || [])] }));
-      setAgentName('');
-      setAgentCompany('');
+      if (contactModal.type === 'agent') {
+        const decisionBoardAgentId = contactModal.item ? getBoardAgentId(contactModal.item) : null;
+        const agentPayload = { ...payload, agentName: trimmedName };
+        const agent = decisionBoardAgentId
+          ? await updateDecisionBoardAgent(board.id, decisionBoardAgentId, agentPayload)
+          : await addDecisionBoardAgent(board.id, agentPayload);
+
+        setBoard((current) => ({
+          ...current,
+          agents: decisionBoardAgentId
+            ? (current?.agents || []).map((item) => getBoardAgentId(item) === decisionBoardAgentId ? agent : item)
+            : [agent, ...(current?.agents || [])],
+        }));
+      } else {
+        const decisionBoardBrokerId = contactModal.item ? getBoardBrokerId(contactModal.item) : null;
+        const brokerPayload = { ...payload, brokerName: trimmedName, status: contactModal.item?.status || 'Contacted' };
+        const broker = decisionBoardBrokerId
+          ? await updateDecisionBoardBroker(board.id, decisionBoardBrokerId, brokerPayload)
+          : await addDecisionBoardBroker(board.id, brokerPayload);
+
+        setBoard((current) => ({
+          ...current,
+          brokers: decisionBoardBrokerId
+            ? (current?.brokers || []).map((item) => getBoardBrokerId(item) === decisionBoardBrokerId ? broker : item)
+            : [broker, ...(current?.brokers || [])],
+        }));
+      }
+
+      closeContactModal();
     } catch (error) {
-      Alert.alert('Agent not added', error?.response?.data?.error || error?.message || 'Could not add this agent.');
+      Alert.alert(
+        contactModal.item ? 'Contact not updated' : 'Contact not added',
+        error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Could not save this contact.'
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const addBroker = async () => {
-    const trimmedName = brokerName.trim();
-    if (!board?.id || !trimmedName) return;
+  const isAgentInUse = (decisionBoardAgentId) => listings.some((listing) => (
+    (listing.agents || []).some((agent) => getBoardAgentId(agent) === decisionBoardAgentId)
+  ));
 
-    setSaving(true);
-    try {
-      const broker = await addDecisionBoardBroker(board.id, {
-        brokerName: trimmedName,
-        companyName: brokerCompany.trim(),
-        status: 'Contacted',
-      });
-      setBoard((current) => ({ ...current, brokers: [broker, ...(current?.brokers || [])] }));
-      setBrokerName('');
-      setBrokerCompany('');
-    } catch (error) {
-      Alert.alert('Broker not added', error?.response?.data?.error || error?.message || 'Could not add this broker.');
-    } finally {
-      setSaving(false);
+  const isBrokerInUse = (decisionBoardBrokerId) => listings.some((listing) => (
+    (listing.brokers || []).some((broker) => getBoardBrokerId(broker) === decisionBoardBrokerId)
+  ));
+
+  const removeAgent = (agent) => {
+    const decisionBoardAgentId = getBoardAgentId(agent);
+    if (!board?.id || !decisionBoardAgentId || saving) return;
+
+    if (isAgentInUse(decisionBoardAgentId)) {
+      Alert.alert('Agent in use', 'This agent is linked to a property in this Decision Board. Unlink it from the property before deleting it.');
+      return;
     }
+
+    Alert.alert('Remove agent?', 'This removes the agent from this Decision Board.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setSaving(true);
+          try {
+            await deleteDecisionBoardAgent(board.id, decisionBoardAgentId);
+            setBoard((current) => ({
+              ...current,
+              agents: (current?.agents || []).filter((item) => getBoardAgentId(item) !== decisionBoardAgentId),
+            }));
+          } catch (error) {
+            Alert.alert('Agent not removed', error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Could not remove this agent.');
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const removeBroker = (broker) => {
+    const decisionBoardBrokerId = getBoardBrokerId(broker);
+    if (!board?.id || !decisionBoardBrokerId || saving) return;
+
+    if (isBrokerInUse(decisionBoardBrokerId)) {
+      Alert.alert('Broker in use', 'This broker is linked to a property in this Decision Board. Unlink it from the property before deleting it.');
+      return;
+    }
+
+    Alert.alert('Remove broker?', 'This removes the broker from this Decision Board.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setSaving(true);
+          try {
+            await deleteDecisionBoardBroker(board.id, decisionBoardBrokerId);
+            setBoard((current) => ({
+              ...current,
+              brokers: (current?.brokers || []).filter((item) => getBoardBrokerId(item) !== decisionBoardBrokerId),
+            }));
+          } catch (error) {
+            Alert.alert('Broker not removed', error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Could not remove this broker.');
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
   };
 
   const renderFlowSteps = () => (
@@ -349,47 +473,88 @@ export default function DecisionBoardScreen({ route, navigation }) {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Estate agents</Text>
-          <View style={styles.inputGrid}>
-            <TextInput style={styles.input} value={agentName} onChangeText={setAgentName} placeholder="Agent name" placeholderTextColor="#94A3B8" />
-            <TextInput style={styles.input} value={agentCompany} onChangeText={setAgentCompany} placeholder="Company" placeholderTextColor="#94A3B8" />
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Agents</Text>
+            <TouchableOpacity style={styles.sectionAddButton} onPress={() => openContactModal('agent')}>
+              <Ionicons name="add" size={21} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.inlineButton} onPress={addAgent} disabled={saving || !agentName.trim()}>
-            <Ionicons name="person-add-outline" size={17} color="#FFFFFF" />
-            <Text style={styles.inlineButtonText}>Add agent</Text>
-          </TouchableOpacity>
-          {(board.agents || []).map((agent) => (
+          {(board.agents || []).length ? (board.agents || []).map((agent) => (
             <View key={agent.id || `${agent.agentName}-${agent.companyName}`} style={styles.contactRow}>
               <Ionicons name="business-outline" size={20} color={APP_PURPLE} />
               <View style={styles.contactBody}>
                 <Text style={styles.contactTitle}>{agent.agentName}</Text>
                 <Text style={styles.contactMeta}>{agent.companyName || 'Estate agent'}</Text>
+                {!!agent.phone && <Text style={styles.contactMeta}>{agent.phone}</Text>}
+                {!!agent.email && <Text style={styles.contactMeta}>{agent.email}</Text>}
+                {!!agent.address && <Text style={styles.contactMeta}>{agent.address}</Text>}
+                {!!agent.notes && <Text style={styles.contactNotes}>{agent.notes}</Text>}
               </View>
+              <TouchableOpacity style={styles.contactDeleteButton} onPress={() => openContactModal('agent', agent)} disabled={saving}>
+                <Ionicons name="create-outline" size={18} color={APP_PURPLE} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.contactDeleteButton} onPress={() => removeAgent(agent)} disabled={saving}>
+                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              </TouchableOpacity>
             </View>
-          ))}
+          )) : (
+            <Text style={styles.emptyInline}>No agents added yet.</Text>
+          )}
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mortgage brokers</Text>
-          <View style={styles.inputGrid}>
-            <TextInput style={styles.input} value={brokerName} onChangeText={setBrokerName} placeholder="Broker name" placeholderTextColor="#94A3B8" />
-            <TextInput style={styles.input} value={brokerCompany} onChangeText={setBrokerCompany} placeholder="Company" placeholderTextColor="#94A3B8" />
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Mortgage brokers</Text>
+            <TouchableOpacity style={styles.sectionAddButton} onPress={() => openContactModal('broker')}>
+              <Ionicons name="add" size={21} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.inlineButton} onPress={addBroker} disabled={saving || !brokerName.trim()}>
-            <Ionicons name="briefcase-outline" size={17} color="#FFFFFF" />
-            <Text style={styles.inlineButtonText}>Add broker</Text>
-          </TouchableOpacity>
-          {(board.brokers || []).map((broker) => (
+          {(board.brokers || []).length ? (board.brokers || []).map((broker) => (
             <View key={broker.id || `${broker.brokerName}-${broker.companyName}`} style={styles.contactRow}>
               <Ionicons name="cash-outline" size={20} color={APP_PURPLE} />
               <View style={styles.contactBody}>
                 <Text style={styles.contactTitle}>{broker.brokerName}</Text>
                 <Text style={styles.contactMeta}>{broker.companyName || 'Mortgage broker'} / {broker.status || BROKER_STATUSES[0]}</Text>
+                {!!broker.phone && <Text style={styles.contactMeta}>{broker.phone}</Text>}
+                {!!broker.email && <Text style={styles.contactMeta}>{broker.email}</Text>}
+                {!!broker.address && <Text style={styles.contactMeta}>{broker.address}</Text>}
+                {!!broker.notes && <Text style={styles.contactNotes}>{broker.notes}</Text>}
               </View>
+              <TouchableOpacity style={styles.contactDeleteButton} onPress={() => openContactModal('broker', broker)} disabled={saving}>
+                <Ionicons name="create-outline" size={18} color={APP_PURPLE} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.contactDeleteButton} onPress={() => removeBroker(broker)} disabled={saving}>
+                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              </TouchableOpacity>
             </View>
-          ))}
+          )) : (
+            <Text style={styles.emptyInline}>No brokers added yet.</Text>
+          )}
         </View>
       </ScrollView>
+      <Modal visible={contactModal.visible} transparent animationType="slide" onRequestClose={closeContactModal}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{contactModalTitle}</Text>
+              <TouchableOpacity style={styles.headerIconButton} onPress={closeContactModal}>
+                <Ionicons name="close" size={22} color="#111827" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalBody}>
+              <TextInput style={styles.input} value={contactForm.name} onChangeText={(name) => setContactForm((current) => ({ ...current, name }))} placeholder={contactModal.type === 'agent' ? 'Agent name' : 'Broker name'} placeholderTextColor="#94A3B8" />
+              <TextInput style={styles.input} value={contactForm.company} onChangeText={(company) => setContactForm((current) => ({ ...current, company }))} placeholder="Company" placeholderTextColor="#94A3B8" />
+              <TextInput style={styles.input} value={contactForm.phone} onChangeText={(phone) => setContactForm((current) => ({ ...current, phone }))} placeholder="Phone" placeholderTextColor="#94A3B8" keyboardType="phone-pad" />
+              <TextInput style={styles.input} value={contactForm.email} onChangeText={(email) => setContactForm((current) => ({ ...current, email }))} placeholder="Email" placeholderTextColor="#94A3B8" autoCapitalize="none" keyboardType="email-address" />
+              <TextInput style={styles.input} value={contactForm.address} onChangeText={(address) => setContactForm((current) => ({ ...current, address }))} placeholder="Address" placeholderTextColor="#94A3B8" />
+              <TextInput style={[styles.input, styles.notesField]} value={contactForm.notes} onChangeText={(notes) => setContactForm((current) => ({ ...current, notes }))} placeholder="Notes" placeholderTextColor="#94A3B8" multiline textAlignVertical="top" />
+              <TouchableOpacity style={[styles.modalSaveButton, saving && styles.disabledButton]} onPress={saveContact} disabled={saving || !contactForm.name.trim()}>
+                <Text style={[styles.modalSaveButtonText, saving && styles.disabledButtonText]}>{saving ? 'Saving...' : 'Save contact'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -428,6 +593,7 @@ const styles = StyleSheet.create({
   sectionHeaderRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   sectionTitle: { color: '#111827', fontSize: 15, fontWeight: '900' },
   sectionHint: { color: '#64748B', fontSize: 12, fontWeight: '800', marginTop: 3 },
+  sectionAddButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, height: 34, justifyContent: 'center', width: 34 },
   progressBadge: { backgroundColor: '#EEF2FF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   progressBadgeText: { color: APP_PURPLE, fontSize: 12, fontWeight: '900' },
   progressTrack: { backgroundColor: '#E5E7EB', borderRadius: 999, height: 10, marginTop: 12, overflow: 'hidden' },
@@ -454,14 +620,27 @@ const styles = StyleSheet.create({
   miniStatusTextSelected: { color: APP_PURPLE },
   inputGrid: { gap: 8, marginTop: 12 },
   input: { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0', borderRadius: 8, borderWidth: 1, color: '#111827', fontSize: 14, minHeight: 42, paddingHorizontal: 11 },
+  notesField: { minHeight: 72, paddingTop: 10 },
   inlineButton: { alignItems: 'center', alignSelf: 'flex-start', backgroundColor: APP_PURPLE, borderRadius: 8, flexDirection: 'row', marginTop: 10, minHeight: 40, paddingHorizontal: 13 },
   inlineButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', marginLeft: 6 },
+  disabledButton: { backgroundColor: '#E5E7EB' },
+  disabledButtonText: { color: '#94A3B8' },
   contactRow: { alignItems: 'center', borderTopColor: '#E5E7EB', borderTopWidth: 1, flexDirection: 'row', marginTop: 10, paddingTop: 10 },
   contactBody: { flex: 1, marginLeft: 10 },
   contactTitle: { color: '#111827', fontSize: 14, fontWeight: '900' },
   contactMeta: { color: '#64748B', fontSize: 12, fontWeight: '700', marginTop: 3 },
+  contactNotes: { color: '#475569', fontSize: 12, fontWeight: '700', lineHeight: 17, marginTop: 5 },
+  contactDeleteButton: { alignItems: 'center', height: 38, justifyContent: 'center', width: 38 },
   emptyPanel: { backgroundColor: '#F8FAFC', borderRadius: 8, marginTop: 12, padding: 13 },
   emptyPanelTitle: { color: '#111827', fontSize: 13, fontWeight: '900' },
   emptyPanelText: { color: '#64748B', fontSize: 12, lineHeight: 18, marginTop: 4 },
+  emptyInline: { color: '#64748B', fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 12 },
   emptyTitle: { color: '#111827', fontSize: 17, fontWeight: '900', marginTop: 12, textAlign: 'center' },
+  modalOverlay: { backgroundColor: 'rgba(15, 23, 42, 0.45)', flex: 1, justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
+  modalHeader: { alignItems: 'center', borderBottomColor: '#E5E7EB', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
+  modalTitle: { color: '#111827', fontSize: 16, fontWeight: '900' },
+  modalBody: { gap: 8, padding: 16 },
+  modalSaveButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, justifyContent: 'center', marginTop: 6, minHeight: 44 },
+  modalSaveButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
 });

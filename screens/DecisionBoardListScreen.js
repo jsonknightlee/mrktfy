@@ -212,9 +212,9 @@ export default function DecisionBoardListScreen({ route, navigation }) {
 
   useEffect(() => {
     if (pendingListing) {
-      setBoardName(`${getListingTitle(pendingListing).split(',')[0] || 'Property'} Search`);
+      setBoardName(pendingSource.suggestedBoardName || `${getListingTitle(pendingListing).split(',')[0] || 'Property'} Search`);
     }
-  }, [pendingListing]);
+  }, [pendingListing, pendingSource.suggestedBoardName]);
 
   const addPendingListingToBoard = async (board) => {
     const listingId = getListingId(pendingListing);

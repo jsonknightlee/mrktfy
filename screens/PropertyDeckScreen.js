@@ -17,7 +17,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
-import { addListingToDecisionBoardProject } from '../services/DecisionBoardService';
 import { getListingById } from '../services/listingApi';
 import {
   archivePropertyDeck,
@@ -602,7 +601,6 @@ export default function PropertyDeckScreen({ route }) {
   const [loading, setLoading] = useState(true);
   const [comparisonBoard, setComparisonBoard] = useState(null);
   const [loadingBoard, setLoadingBoard] = useState(false);
-  const [decisionCreatingListingId, setDecisionCreatingListingId] = useState(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [deckFilters, setDeckFilters] = useState(createDefaultDeckFilters);
 
@@ -1113,30 +1111,17 @@ export default function PropertyDeckScreen({ route }) {
 
   const openDecisionBoard = async (listing) => {
     const listingId = getListingId(listing);
-    if (!listingId || decisionCreatingListingId) return;
+    if (!listingId) return;
 
-    setDecisionCreatingListingId(listingId);
-    try {
-      const decisionBoard = await addListingToDecisionBoardProject({
-        listingId,
+    navigation.navigate('DecisionBoards', {
+      pendingListing: listing,
+      pendingSource: {
         shortListId: listing.shortListId || listing.ShortListID || comparisonBoard?.shortListId || comparisonBoard?.ShortListID,
         comparisonBoardId: comparisonBoard?.id || comparisonBoard?.ID,
-        boardName: `${selectedDeck?.name || 'Property'} Decisions`,
-      });
-
-      navigation.navigate('DecisionBoard', {
-        decisionBoardId: decisionBoard?.id,
-        decisionBoard,
         sourceFlow: 'propertyDeck',
-      });
-    } catch (error) {
-      Alert.alert(
-        'Could not open Decision Board',
-        error?.response?.data?.error || error?.response?.data?.message || error?.message || 'This property could not be added to a Decision Board.'
-      );
-    } finally {
-      setDecisionCreatingListingId(null);
-    }
+        suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
+      },
+    });
   };
 
   const confirmArchiveDeck = (deck) => {
@@ -1525,7 +1510,6 @@ export default function PropertyDeckScreen({ route }) {
     const userRating = getUserMatchRating(item);
     const listingId = getListingId(item);
     const distanceText = formatSearchDistance(item);
-    const creatingDecision = decisionCreatingListingId === listingId;
 
     return (
       <TouchableOpacity
@@ -1570,11 +1554,10 @@ export default function PropertyDeckScreen({ route }) {
         </View>
 
         <TouchableOpacity
-          style={[styles.decisionButton, creatingDecision && styles.disabledDecisionButton]}
+          style={styles.decisionButton}
           onPress={() => openDecisionBoard(item)}
-          disabled={creatingDecision}
         >
-          <Ionicons name="flag-outline" size={17} color={creatingDecision ? '#94A3B8' : APP_PURPLE} />
+          <Ionicons name="flag-outline" size={17} color={APP_PURPLE} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1604,7 +1587,6 @@ export default function PropertyDeckScreen({ route }) {
     const notes = getComparisonNotes(item);
     const distanceText = formatSearchDistance(item);
     const listingId = getListingId(item);
-    const creatingDecision = decisionCreatingListingId === listingId;
 
     return (
       <View style={styles.compareCard}>
@@ -1640,14 +1622,11 @@ export default function PropertyDeckScreen({ route }) {
         </View>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.compareDecisionButton, creatingDecision && styles.disabledDecisionButton]}
+          style={styles.compareDecisionButton}
           onPress={() => openDecisionBoard(item)}
-          disabled={creatingDecision}
         >
-          <Ionicons name="flag-outline" size={18} color={creatingDecision ? '#94A3B8' : '#FFFFFF'} />
-          <Text style={[styles.compareDecisionButtonText, creatingDecision && styles.disabledDecisionButtonText]}>
-            {creatingDecision ? 'Opening...' : 'Pursue'}
-          </Text>
+          <Ionicons name="flag-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.compareDecisionButtonText}>Pursue</Text>
         </TouchableOpacity>
       </View>
     );

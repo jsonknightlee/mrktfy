@@ -87,8 +87,11 @@ export const normalizeDecisionBoardListing = (item) => {
   const trafficLightStatus = getValue(item, ['trafficLightStatus', 'TrafficLightStatus'], null);
   const listingStatus = getValue(item, ['listingStatus', 'ListingStatus'], 'Active');
   const listingId = stringifyId(getValue(item, ['listingId', 'ListingID'], listing?.ID));
+  const rawAgents = getValue(item, ['agents', 'Agents', 'listingAgents', 'ListingAgents'], []);
+  const rawBrokers = getValue(item, ['brokers', 'Brokers', 'listingBrokers', 'ListingBrokers'], []);
   const rawTimeline = getValue(item, ['timeline', 'Timeline', 'events', 'Events'], []);
   const rawTasks = getValue(item, ['tasks', 'Tasks'], []);
+  const rawNotes = getValue(item, ['listingNotes', 'ListingNotes', 'noteEntries', 'NoteEntries'], []);
   const rawMedia = getValue(item, ['media', 'Media'], []);
 
   return {
@@ -107,8 +110,11 @@ export const normalizeDecisionBoardListing = (item) => {
     createdAt: getValue(item, ['createdAt', 'CreatedAt'], null),
     updatedAt: getValue(item, ['updatedAt', 'UpdatedAt'], null),
     listing: hasNestedListing ? listing : { ...listing, ID: listingId },
+    agents: Array.isArray(rawAgents) ? rawAgents.map(normalizeDecisionBoardListingAgent).filter(Boolean) : [],
+    brokers: Array.isArray(rawBrokers) ? rawBrokers.map(normalizeDecisionBoardListingBroker).filter(Boolean) : [],
     timeline: Array.isArray(rawTimeline) ? rawTimeline.map(normalizeTimelineEvent).filter(Boolean) : [],
     tasks: Array.isArray(rawTasks) ? rawTasks.map(normalizeTask).filter(Boolean) : [],
+    listingNotes: Array.isArray(rawNotes) ? rawNotes.map(normalizeDecisionBoardNote).filter(Boolean) : [],
     media: Array.isArray(rawMedia) ? rawMedia.map(normalizeMedia).filter(Boolean) : [],
   };
 };
@@ -147,6 +153,19 @@ const normalizeTask = (task) => {
   };
 };
 
+const normalizeDecisionBoardNote = (note) => {
+  if (!note || typeof note !== 'object') return null;
+
+  return {
+    ...note,
+    id: stringifyId(getValue(note, ['id', 'ID'])),
+    decisionBoardListingId: stringifyId(getValue(note, ['decisionBoardListingId', 'DecisionBoardListingID'])),
+    noteText: getValue(note, ['noteText', 'NoteText', 'notes', 'Notes'], ''),
+    createdAt: getValue(note, ['createdAt', 'CreatedAt'], null),
+    updatedAt: getValue(note, ['updatedAt', 'UpdatedAt'], null),
+  };
+};
+
 const normalizeMedia = (media) => {
   if (!media || typeof media !== 'object') return null;
 
@@ -180,7 +199,8 @@ export const normalizeDecisionBoardAgent = (agent) => {
     email: getValue(agent, ['email', 'Email'], getValue(realEstateAgent, ['email', 'Email'], '')),
     website: getValue(agent, ['website', 'Website'], getValue(realEstateAgent, ['website', 'Website'], '')),
     branchName: getValue(agent, ['branchName', 'BranchName'], getValue(realEstateAgent, ['branchName', 'BranchName'], '')),
-    notes: getValue(agent, ['notes', 'Notes'], null),
+    address: getValue(agent, ['address', 'Address'], getValue(realEstateAgent, ['address', 'Address'], '')),
+    notes: getValue(agent, ['notes', 'Notes'], getValue(realEstateAgent, ['notes', 'Notes'], null)),
     createdAt: getValue(agent, ['createdAt', 'CreatedAt'], null),
   };
 };
@@ -201,9 +221,68 @@ export const normalizeDecisionBoardBroker = (broker) => {
     phone: getValue(broker, ['phone', 'Phone'], getValue(mortgageBroker, ['phone', 'Phone'], '')),
     email: getValue(broker, ['email', 'Email'], getValue(mortgageBroker, ['email', 'Email'], '')),
     website: getValue(broker, ['website', 'Website'], getValue(mortgageBroker, ['website', 'Website'], '')),
+    address: getValue(broker, ['address', 'Address'], getValue(mortgageBroker, ['address', 'Address'], '')),
     status: getValue(broker, ['status', 'Status'], 'Contacted'),
-    notes: getValue(broker, ['notes', 'Notes'], null),
+    notes: getValue(broker, ['notes', 'Notes'], getValue(mortgageBroker, ['notes', 'Notes'], null)),
     createdAt: getValue(broker, ['createdAt', 'CreatedAt'], null),
+  };
+};
+
+const normalizeDecisionBoardListingAgent = (agent) => {
+  if (!agent || typeof agent !== 'object') return null;
+
+  const normalized = normalizeDecisionBoardAgent(agent);
+  const decisionBoardListingAgentId = stringifyId(getValue(agent, [
+    'decisionBoardListingAgentId',
+    'DecisionBoardListingAgentID',
+    'listingAgentId',
+    'ListingAgentID',
+    'linkId',
+    'LinkID',
+    'id',
+    'ID',
+  ]));
+  const decisionBoardAgentId = stringifyId(getValue(agent, [
+    'decisionBoardAgentId',
+    'DecisionBoardAgentID',
+    'boardAgentId',
+    'BoardAgentID',
+  ]));
+
+  return {
+    ...normalized,
+    id: decisionBoardListingAgentId || normalized?.id,
+    decisionBoardListingAgentId,
+    decisionBoardAgentId,
+  };
+};
+
+const normalizeDecisionBoardListingBroker = (broker) => {
+  if (!broker || typeof broker !== 'object') return null;
+
+  const normalized = normalizeDecisionBoardBroker(broker);
+  const decisionBoardListingBrokerId = stringifyId(getValue(broker, [
+    'decisionBoardListingBrokerId',
+    'DecisionBoardListingBrokerID',
+    'listingBrokerId',
+    'ListingBrokerID',
+    'linkId',
+    'LinkID',
+    'id',
+    'ID',
+  ]));
+  const decisionBoardBrokerId = stringifyId(getValue(broker, [
+    'decisionBoardBrokerId',
+    'DecisionBoardBrokerID',
+    'boardBrokerId',
+    'BoardBrokerID',
+  ]));
+
+  return {
+    ...normalized,
+    id: decisionBoardListingBrokerId || normalized?.id,
+    decisionBoardListingBrokerId,
+    decisionBoardBrokerId,
   };
 };
 
@@ -331,6 +410,66 @@ export const updateDecisionBoardListing = async (decisionBoardId, decisionBoardL
   return normalizeDecisionBoardListing(data?.decisionBoardListing || data?.listing || data);
 };
 
+export const attachDecisionBoardListingAgent = async (decisionBoardListingId, payload = {}) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(
+    payload.decisionBoardAgentId ?? payload.DecisionBoardAgentID ?? payload.realEstateAgentId ?? payload.RealEstateAgentID,
+    'decisionBoardAgentId'
+  );
+
+  const { data } = await api.post(
+    `/api/decision-board-listings/${decisionBoardListingId}/agents`,
+    compactPayload(payload)
+  );
+
+  if (data?.listingAgent) {
+    return normalizeDecisionBoardListingAgent(data.listingAgent);
+  }
+
+  return normalizeDecisionBoardListing(data?.decisionBoardListing || data?.listing || data);
+};
+
+export const detachDecisionBoardListingAgent = async (decisionBoardListingId, decisionBoardListingAgentId) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(decisionBoardListingAgentId, 'decisionBoardListingAgentId');
+
+  const { data } = await api.delete(
+    `/api/decision-board-listings/${decisionBoardListingId}/agents/${decisionBoardListingAgentId}`
+  );
+
+  return normalizeDecisionBoardListing(data?.decisionBoardListing || data?.listing || data);
+};
+
+export const attachDecisionBoardListingBroker = async (decisionBoardListingId, payload = {}) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(
+    payload.decisionBoardBrokerId ?? payload.DecisionBoardBrokerID ?? payload.brokerId ?? payload.BrokerID ?? payload.mortgageBrokerId ?? payload.MortgageBrokerID,
+    'decisionBoardBrokerId'
+  );
+
+  const { data } = await api.post(
+    `/api/decision-board-listings/${decisionBoardListingId}/brokers`,
+    compactPayload(payload)
+  );
+
+  if (data?.listingBroker) {
+    return normalizeDecisionBoardListingBroker(data.listingBroker);
+  }
+
+  return normalizeDecisionBoardListing(data?.decisionBoardListing || data?.listing || data);
+};
+
+export const detachDecisionBoardListingBroker = async (decisionBoardListingId, decisionBoardListingBrokerId) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(decisionBoardListingBrokerId, 'decisionBoardListingBrokerId');
+
+  const { data } = await api.delete(
+    `/api/decision-board-listings/${decisionBoardListingId}/brokers/${decisionBoardListingBrokerId}`
+  );
+
+  return normalizeDecisionBoardListing(data?.decisionBoardListing || data?.listing || data);
+};
+
 export const addDecisionBoardAgent = async (decisionBoardId, payload = {}) => {
   requireId(decisionBoardId, 'decisionBoardId');
 
@@ -342,11 +481,51 @@ export const addDecisionBoardAgent = async (decisionBoardId, payload = {}) => {
   return normalizeDecisionBoardAgent(data?.agent || data?.decisionBoardAgent || data);
 };
 
+export const deleteDecisionBoardAgent = async (decisionBoardId, decisionBoardAgentId) => {
+  requireId(decisionBoardId, 'decisionBoardId');
+  requireId(decisionBoardAgentId, 'decisionBoardAgentId');
+
+  const { data } = await api.delete(`/api/decision-boards/${decisionBoardId}/agents/${decisionBoardAgentId}`);
+  return data || { success: true };
+};
+
+export const updateDecisionBoardAgent = async (decisionBoardId, decisionBoardAgentId, payload = {}) => {
+  requireId(decisionBoardId, 'decisionBoardId');
+  requireId(decisionBoardAgentId, 'decisionBoardAgentId');
+
+  const { data } = await api.patch(
+    `/api/decision-boards/${decisionBoardId}/agents/${decisionBoardAgentId}`,
+    compactPayload(payload)
+  );
+
+  return normalizeDecisionBoardAgent(data?.agent || data?.decisionBoardAgent || data);
+};
+
 export const addDecisionBoardBroker = async (decisionBoardId, payload = {}) => {
   requireId(decisionBoardId, 'decisionBoardId');
 
   const { data } = await api.post(
     `/api/decision-boards/${decisionBoardId}/brokers`,
+    compactPayload(payload)
+  );
+
+  return normalizeDecisionBoardBroker(data?.broker || data?.decisionBoardBroker || data);
+};
+
+export const deleteDecisionBoardBroker = async (decisionBoardId, decisionBoardBrokerId) => {
+  requireId(decisionBoardId, 'decisionBoardId');
+  requireId(decisionBoardBrokerId, 'decisionBoardBrokerId');
+
+  const { data } = await api.delete(`/api/decision-boards/${decisionBoardId}/brokers/${decisionBoardBrokerId}`);
+  return data || { success: true };
+};
+
+export const updateDecisionBoardBroker = async (decisionBoardId, decisionBoardBrokerId, payload = {}) => {
+  requireId(decisionBoardId, 'decisionBoardId');
+  requireId(decisionBoardBrokerId, 'decisionBoardBrokerId');
+
+  const { data } = await api.patch(
+    `/api/decision-boards/${decisionBoardId}/brokers/${decisionBoardBrokerId}`,
     compactPayload(payload)
   );
 
@@ -390,6 +569,37 @@ export const addDecisionBoardTimelineEvent = async (decisionBoardListingId, payl
   );
 
   return normalizeTimelineEvent(data?.timelineEvent || data?.event || data);
+};
+
+export const addDecisionBoardNote = async (decisionBoardListingId, payload = {}) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+
+  const { data } = await api.post(
+    `/api/decision-board-listings/${decisionBoardListingId}/notes`,
+    compactPayload(payload)
+  );
+
+  return normalizeDecisionBoardNote(data?.note || data);
+};
+
+export const updateDecisionBoardNote = async (decisionBoardListingId, noteId, payload = {}) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(noteId, 'noteId');
+
+  const { data } = await api.patch(
+    `/api/decision-board-listings/${decisionBoardListingId}/notes/${noteId}`,
+    compactPayload(payload)
+  );
+
+  return normalizeDecisionBoardNote(data?.note || data);
+};
+
+export const deleteDecisionBoardNote = async (decisionBoardListingId, noteId) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(noteId, 'noteId');
+
+  const { data } = await api.delete(`/api/decision-board-listings/${decisionBoardListingId}/notes/${noteId}`);
+  return data || { success: true };
 };
 
 export const addDecisionBoardTask = async (decisionBoardListingId, payload = {}) => {
