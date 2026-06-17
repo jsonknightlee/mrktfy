@@ -231,7 +231,6 @@ export default function DecisionBoardListScreen({ route, navigation }) {
       await addDecisionBoardListing(board.id, {
         listingId,
         shortListId: pendingSource.shortListId,
-        comparisonBoardId: pendingSource.comparisonBoardId,
         listingStatus: 'Active',
         trafficLightStatus: 'Green',
         userVerdict: 'Maybe',
@@ -265,7 +264,6 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         await addDecisionBoardListing(board.id, {
           listingId: getListingId(pendingListing),
           shortListId: pendingSource.shortListId,
-          comparisonBoardId: pendingSource.comparisonBoardId,
           listingStatus: 'Active',
           trafficLightStatus: 'Green',
           userVerdict: 'Maybe',

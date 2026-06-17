@@ -389,7 +389,6 @@ export const addListingToDecisionBoardProject = async (payload = {}) => {
   await addDecisionBoardListing(decisionBoard.id, {
     listingId: payload.listingId ?? payload.ListingID,
     shortListId: payload.shortListId,
-    comparisonBoardId: payload.comparisonBoardId,
     listingStatus: payload.listingStatus || 'Active',
     trafficLightStatus: payload.trafficLightStatus || 'Green',
     userVerdict: payload.userVerdict || 'Maybe',

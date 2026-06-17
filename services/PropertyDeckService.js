@@ -293,6 +293,12 @@ const normalizeListing = (listing, notification) => {
     status: listing.status || listing.Status,
     matchScore: listing.matchScore ?? listing.MatchScore,
     rank: listing.rank ?? listing.Rank,
+    userIntent: listing.userIntent ?? listing.UserIntent ?? null,
+    propertyRank: listing.propertyRank ?? listing.PropertyRank ?? null,
+    yourFitRank: listing.yourFitRank ?? listing.YourFitRank ?? null,
+    confidenceScore: listing.confidenceScore ?? listing.ConfidenceScore ?? null,
+    scoreBreakdownJson: listing.scoreBreakdownJson ?? listing.ScoreBreakdownJson ?? null,
+    rankingExplanation: listing.rankingExplanation ?? listing.RankingExplanation ?? null,
     prosJson: listing.prosJson || listing.ProsJson,
     consJson: listing.consJson || listing.ConsJson,
     metricsJson: listing.metricsJson || listing.MetricsJson,
@@ -840,6 +846,54 @@ export const saveToShortlist = async (deckId, listing, userProfile) => withApiFa
   },
   () => saveLocalToShortlist(deckId, listing, userProfile),
   'save shortlist listing'
+);
+
+export const updateShortlistRanking = async (deckId, listingId, rankingPayload = {}, userProfile) => withApiFallback(
+  async () => {
+    requireBackendId(deckId, 'deckId');
+    const { data } = await api.patch(`/api/property-decks/${deckId}/shortlist/${listingId}/ranking`, rankingPayload);
+    const deck = await getPropertyDeck(deckId, userProfile);
+    return getItems(data, 'shortlist')
+      .map((item) => normalizeListing(item))
+      .map((item) => withDeckSearchDistance(item, deck));
+  },
+  async () => {
+    const id = String(listingId || '');
+    if (!id) return [];
+
+    const decks = await getLocalPropertyDecks(userProfile);
+    const nextDecks = decks.map((deck) => {
+      if (deck.id !== deckId) return deck;
+
+      return {
+        ...deck,
+        shortlist: (deck.shortlist || []).map((item) => (
+          getListingId(item) === id ? { ...item, ...rankingPayload } : item
+        )),
+        updatedAt: Date.now(),
+      };
+    });
+
+    await writeJsonArray(DECKS_KEY, nextDecks);
+    return nextDecks.find((deck) => deck.id === deckId)?.shortlist || [];
+  },
+  'update shortlist ranking'
+);
+
+export const recalculateShortlistRankings = async (deckId, intent = 'Buyer', userProfile) => withApiFallback(
+  async () => {
+    requireBackendId(deckId, 'deckId');
+    const { data } = await api.post(`/api/property-decks/${deckId}/shortlist/rankings/recalculate`, { intent });
+    const deck = await getPropertyDeck(deckId, userProfile);
+    return getItems(data, 'shortlist')
+      .map((item) => normalizeListing(item))
+      .map((item) => withDeckSearchDistance(item, deck));
+  },
+  async () => {
+    const deck = await getPropertyDeck(deckId, userProfile);
+    return deck?.shortlist || [];
+  },
+  'recalculate shortlist rankings'
 );
 
 const dismissLocalDeckListing = async (deckId, listingId, userProfile) => {

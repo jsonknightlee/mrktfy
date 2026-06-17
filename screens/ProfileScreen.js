@@ -56,7 +56,7 @@ export default function ProfileScreen({ navigation }) {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const [tab, setTab] = useState('profile'); // 'profile' | 'activity' | 'settings'
+  const [tab, setTab] = useState('profile'); // 'profile' | 'preferences' | 'activity' | 'settings'
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [favorites, setFavorites] = useState([]);
   const [history, setHistory] = useState([]);
@@ -281,6 +281,9 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity onPress={() => setTab('profile')} style={[styles.tab, tab==='profile' && styles.tabActive]}>
           <Text style={[styles.tabText, tab==='profile' && styles.tabTextActive]}>Profile</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setTab('preferences')} style={[styles.tab, tab==='preferences' && styles.tabActive]}>
+          <Text style={[styles.tabText, tab==='preferences' && styles.tabTextActive]}>Preferences</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setTab('activity')} style={[styles.tab, tab==='activity' && styles.tabActive]}>
           <Text style={[styles.tabText, tab==='activity' && styles.tabTextActive]}>Activity</Text>
         </TouchableOpacity>
@@ -463,6 +466,23 @@ export default function ProfileScreen({ navigation }) {
           >
             <Text style={styles.logoutText}>{loggingOut ? 'Logging out…' : 'Logout'}</Text>
           </TouchableOpacity>
+        </ScrollView>
+      ) : tab === 'preferences' ? (
+        <ScrollView style={styles.settingsPane}>
+          <Text style={styles.title}>Preferences</Text>
+          <View style={styles.subscriptionCard}>
+            <Text style={styles.subscriptionTitle}>Buyer preferences</Text>
+            <Text style={styles.subscriptionInfo}>
+              Set your default buying goals for personal fit rankings. Deck-specific preferences can be opened from Property Deck filters.
+            </Text>
+            <TouchableOpacity
+              style={styles.upgradeButton}
+              onPress={() => navigation.navigate('BuyerPreferences', { scope: 'default' })}
+            >
+              <Ionicons name="options" size={20} color="#FFFFFF" />
+              <Text style={styles.upgradeButtonText}>Open Buyer Preferences</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       ) : tab === 'settings' ? (
         <View style={styles.settingsPane}>

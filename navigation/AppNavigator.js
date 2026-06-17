@@ -21,6 +21,7 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import NotificationListingsScreen from '../screens/NotificationListingsScreen';
 import SubscriptionScreen from '../screens/SubscriptionScreen';
 import PaymentScreen from '../screens/PaymentScreen';
+import BuyerPreferencesScreen from '../screens/BuyerPreferencesScreen';
 
 import { AuthContext } from '../contexts/AuthContext';
 import NotificationBadge from '../components/NotificationBadge';
@@ -149,6 +150,15 @@ export default function AppNavigator() {
             <Stack.Screen
               name="Payment"
               component={PaymentScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="BuyerPreferences"
+              component={BuyerPreferencesScreen}
               options={{
                 headerShown: false,
                 gestureEnabled: true,

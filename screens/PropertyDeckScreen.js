@@ -24,11 +24,9 @@ import {
   dismissDeckListing,
   getListingId,
   getMatchedDeckListings,
-  getOrCreateComparisonBoard,
   getPropertyDeckLimit,
   getPropertyDecks,
   getShortlist,
-  removeComparisonBoardListing,
   removeFromShortlist,
   renamePropertyDeck,
   restorePropertyDeck,
@@ -41,7 +39,6 @@ const RICH_FILTER_ENRICHMENT_MATCH_LIMIT = 20;
 const FLOW_STEPS = [
   { key: 'detail', label: 'Property Deck' },
   { key: 'shortlist', label: 'Shortlist' },
-  { key: 'board', label: 'Board' },
   { key: 'decision', label: 'Decision' },
 ];
 const PROPERTY_TYPE_OPTIONS = [
@@ -554,32 +551,6 @@ const getUserMatchRating = (listing) => {
   return clampRating(getListingRating(listing) - 7);
 };
 
-const toTextList = (value, fallback = []) => {
-  const parsed = parseJsonObject(value);
-  if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
-  if (typeof parsed === 'object' && parsed) return Object.values(parsed).filter(Boolean).map(String);
-  if (Array.isArray(value)) return value.filter(Boolean).map(String);
-  return fallback;
-};
-
-const getComparisonNotes = (listing) => {
-  const pros = toTextList(listing?.ProsJson || listing?.prosJson, [
-    listing?.Price ? 'Price data available' : null,
-    listing?.Beds ? `${listing.Beds} bedroom profile` : null,
-    normalizeImageUrls(listing).length ? 'Image set available for review' : null,
-  ].filter(Boolean));
-
-  const cons = toTextList(listing?.ConsJson || listing?.consJson, [
-    !listing?.Description ? 'Limited description data' : null,
-    !listing?.Baths ? 'Bathroom data missing' : null,
-  ].filter(Boolean));
-
-  return {
-    pros: pros.length ? pros.slice(0, 3) : ['Needs deeper analysis'],
-    cons: cons.length ? cons.slice(0, 3) : ['No clear concerns surfaced yet'],
-  };
-};
-
 export default function PropertyDeckScreen({ route }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -599,8 +570,6 @@ export default function PropertyDeckScreen({ route }) {
   const [editingDeckId, setEditingDeckId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const [loading, setLoading] = useState(true);
-  const [comparisonBoard, setComparisonBoard] = useState(null);
-  const [loadingBoard, setLoadingBoard] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [deckFilters, setDeckFilters] = useState(createDefaultDeckFilters);
 
@@ -614,10 +583,6 @@ export default function PropertyDeckScreen({ route }) {
   );
   const currentListing = filteredDeckListings[currentIndex];
   const canCreateDeck = deckLimit > 0 && decks.length < deckLimit;
-
-  const boardListings = comparisonBoard?.listings?.length
-    ? comparisonBoard.listings
-    : selectedDeck?.shortlist || [];
 
   const loadDecks = useCallback(async () => {
     setLoading(true);
@@ -790,34 +755,13 @@ export default function PropertyDeckScreen({ route }) {
         return;
       }
 
-      if ((mode === 'detail' || mode === 'shortlist' || mode === 'board') && selectedDeckId) {
+      if ((mode === 'detail' || mode === 'shortlist') && selectedDeckId) {
         loadSelectedDeck(selectedDeckId);
       } else {
         loadDecks();
       }
     }, [loadDecks, loadSelectedDeck, mode, route?.params?.openDeckId, selectedDeckId])
   );
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadBoard = async () => {
-      if (mode !== 'board' || !selectedDeckId) return;
-
-      setLoadingBoard(true);
-      const board = await getOrCreateComparisonBoard(selectedDeckId, {}, userProfile);
-      if (isMounted) {
-        setComparisonBoard(board);
-        setLoadingBoard(false);
-      }
-    };
-
-    loadBoard();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [mode, selectedDeckId, userProfile]);
 
   const cardStyle = useMemo(() => {
     const rotate = pan.x.interpolate({
@@ -1095,20 +1039,6 @@ export default function PropertyDeckScreen({ route }) {
     await loadSelectedDeck(selectedDeckId);
   };
 
-  const handleRemoveFromBoard = async (listingId) => {
-    if (!listingId) return;
-
-    await removeComparisonBoardListing(comparisonBoard?.id, listingId);
-    setComparisonBoard((board) => {
-      if (!board) return board;
-
-      return {
-        ...board,
-        listings: board.listings.filter((listing) => getListingId(listing) !== String(listingId)),
-      };
-    });
-  };
-
   const openDecisionBoard = async (listing) => {
     const listingId = getListingId(listing);
     if (!listingId) return;
@@ -1116,8 +1046,7 @@ export default function PropertyDeckScreen({ route }) {
     navigation.navigate('DecisionBoards', {
       pendingListing: listing,
       pendingSource: {
-        shortListId: listing.shortListId || listing.ShortListID || comparisonBoard?.shortListId || comparisonBoard?.ShortListID,
-        comparisonBoardId: comparisonBoard?.id || comparisonBoard?.ID,
+        shortListId: listing.shortListId || listing.ShortListID,
         sourceFlow: 'propertyDeck',
         suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
       },
@@ -1496,202 +1425,11 @@ export default function PropertyDeckScreen({ route }) {
 
         <TouchableOpacity
           style={styles.removeButton}
-          onPress={() => handleRemoveFromBoard(listingId)}
-        >
-          <Ionicons name="trash-outline" size={18} color="#EF4444" />
-        </TouchableOpacity>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderBoardItem = ({ item, index }) => {
-    const imageUrl = normalizeImageUrls(item)[0];
-    const propertyRating = getListingRating(item);
-    const userRating = getUserMatchRating(item);
-    const listingId = getListingId(item);
-    const distanceText = formatSearchDistance(item);
-
-    return (
-      <TouchableOpacity
-        style={styles.boardCard}
-        activeOpacity={0.9}
-        onPress={() => openListingPreview(item)}
-        onLongPress={() => openFullListing(item)}
-      >
-        <Text style={styles.boardRank}>#{index + 1}</Text>
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.boardImage} />
-        ) : (
-          <View style={[styles.boardImage, styles.placeholderImage]}>
-            <Ionicons name="home-outline" size={26} color="#C7CDD8" />
-          </View>
-        )}
-
-        <View style={styles.boardContent}>
-          <Text style={styles.boardPrice}>{formatPrice(item.Price)}</Text>
-          {!!distanceText && (
-            <Text style={styles.distanceText} numberOfLines={1}>{distanceText}</Text>
-          )}
-          <Text style={styles.boardTitle} numberOfLines={2}>
-            {item.Title || item.Address || 'Shortlisted property'}
-          </Text>
-          <Text style={styles.boardMeta} numberOfLines={1}>
-            {[item.Beds && `${item.Beds} beds`, item.Baths && `${item.Baths} baths`, item.PropertyType]
-              .filter(Boolean)
-              .join(' / ')}
-          </Text>
-        </View>
-
-        <View style={styles.ratingStack}>
-          <View style={styles.ratingPill}>
-            <Text style={styles.ratingLabel}>Property</Text>
-            <Text style={styles.ratingValue}>{propertyRating}</Text>
-          </View>
-          <View style={[styles.ratingPill, styles.userRatingPill]}>
-            <Text style={[styles.ratingLabel, styles.userRatingLabel]}>Your fit</Text>
-            <Text style={[styles.ratingValue, styles.userRatingValue]}>{userRating}</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.decisionButton}
-          onPress={() => openDecisionBoard(item)}
-        >
-          <Ionicons name="flag-outline" size={17} color={APP_PURPLE} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.removeButton}
           onPress={() => handleRemoveFromShortlist(listingId)}
         >
           <Ionicons name="trash-outline" size={18} color="#EF4444" />
         </TouchableOpacity>
       </TouchableOpacity>
-    );
-  };
-
-  const renderComparisonCandidate = (item, label) => {
-    if (!item) {
-      return (
-        <View style={styles.compareCard}>
-          <Text style={styles.compareLabel}>{label}</Text>
-          <View style={styles.compareEmpty}>
-            <Ionicons name="add-circle-outline" size={26} color="#C7CDD8" />
-            <Text style={styles.emptyText}>Add another shortlist property to compare.</Text>
-          </View>
-        </View>
-      );
-    }
-
-    const imageUrl = normalizeImageUrls(item)[0];
-    const notes = getComparisonNotes(item);
-    const distanceText = formatSearchDistance(item);
-    const listingId = getListingId(item);
-
-    return (
-      <View style={styles.compareCard}>
-        <TouchableOpacity activeOpacity={0.9} onPress={() => openListingPreview(item)}>
-        <Text style={styles.compareLabel}>{label}</Text>
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.compareImage} />
-        ) : (
-          <View style={[styles.compareImage, styles.placeholderImage]}>
-            <Ionicons name="home-outline" size={30} color="#C7CDD8" />
-          </View>
-        )}
-        <View style={styles.compareBody}>
-          <Text style={styles.boardPrice}>{formatPrice(item.Price)}</Text>
-          {!!distanceText && (
-            <Text style={styles.distanceText} numberOfLines={1}>{distanceText}</Text>
-          )}
-          <Text style={styles.boardTitle} numberOfLines={2}>
-            {item.Title || item.Address || 'Shortlisted property'}
-          </Text>
-          <View style={styles.compareScoreRow}>
-            <Text style={styles.compareScore}>Property {getListingRating(item)}</Text>
-            <Text style={styles.compareScore}>Your fit {getUserMatchRating(item)}</Text>
-          </View>
-          <Text style={styles.compareSubhead}>Pros</Text>
-          {notes.pros.map((note, index) => (
-            <Text key={`pro-${index}`} style={styles.compareNote}>+ {note}</Text>
-          ))}
-          <Text style={styles.compareSubhead}>Cons</Text>
-          {notes.cons.map((note, index) => (
-            <Text key={`con-${index}`} style={styles.compareNote}>- {note}</Text>
-          ))}
-        </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.compareDecisionButton}
-          onPress={() => openDecisionBoard(item)}
-        >
-          <Ionicons name="flag-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.compareDecisionButtonText}>Pursue</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  const renderBoardScreen = () => {
-    const shortlist = [...boardListings].sort((a, b) => (
-      (getNumericValue(a?.boardRank, a?.BoardRank) ?? 9999) - (getNumericValue(b?.boardRank, b?.BoardRank) ?? 9999) ||
-      getUserMatchRating(b) - getUserMatchRating(a) ||
-      getListingRating(b) - getListingRating(a)
-    ));
-    const [firstCandidate, secondCandidate] = shortlist;
-
-    return (
-      <>
-        <View style={styles.detailHeader}>
-          <TouchableOpacity style={styles.backButton} onPress={() => setMode('shortlist')}>
-            <Ionicons name="arrow-back" size={22} color="#111827" />
-          </TouchableOpacity>
-          <View style={styles.detailHeaderText}>
-            <Text style={styles.title} numberOfLines={1}>Decider Board</Text>
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {comparisonBoard?.name || selectedDeck?.name || 'Property Deck'} / {shortlist.length} candidates
-            </Text>
-          </View>
-        </View>
-
-        {renderFlowSteps()}
-
-        <View style={styles.boardIntro}>
-          <View style={styles.boardIntroIcon}>
-            <Ionicons name="analytics-outline" size={22} color={APP_PURPLE} />
-          </View>
-          <View style={styles.boardIntroText}>
-            <Text style={styles.boardIntroTitle}>Comparison workspace</Text>
-            <Text style={styles.boardIntroCopy}>
-              Compare the strongest candidates head to head, then keep thinning the ranked list below.
-            </Text>
-          </View>
-        </View>
-
-        <ScrollView
-          horizontal
-          contentContainerStyle={styles.compareRow}
-          showsHorizontalScrollIndicator={false}
-        >
-          {renderComparisonCandidate(firstCandidate, 'Candidate A')}
-          {renderComparisonCandidate(secondCandidate, 'Candidate B')}
-        </ScrollView>
-
-        <FlatList
-          data={shortlist}
-          renderItem={renderBoardItem}
-          keyExtractor={(item, index) => getListingId(item) || `board-${index}`}
-          contentContainerStyle={styles.boardList}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Ionicons name="albums-outline" size={44} color="#C7CDD8" />
-              <Text style={styles.emptyTitle}>{loadingBoard ? 'Loading board' : 'No board candidates yet'}</Text>
-              <Text style={styles.emptyText}>Move properties into the shortlist before opening the Decider Board.</Text>
-            </View>
-          }
-          showsVerticalScrollIndicator={false}
-        />
-      </>
     );
   };
 
@@ -1768,32 +1506,12 @@ export default function PropertyDeckScreen({ route }) {
           <View style={styles.emptyState}>
             <Ionicons name="albums-outline" size={44} color="#C7CDD8" />
             <Text style={styles.emptyTitle}>No shortlisted properties yet.</Text>
-            <Text style={styles.emptyText}>Go back to the deck and swipe right on listings you want to compare.</Text>
+            <Text style={styles.emptyText}>Go back to the deck and swipe right on listings you want to pursue.</Text>
           </View>
         }
         showsVerticalScrollIndicator={false}
       />
 
-      <TouchableOpacity
-        style={[
-          styles.flowNextButton,
-          !(selectedDeck?.shortlist.length) && styles.disabledFlowNextButton,
-        ]}
-        disabled={!(selectedDeck?.shortlist.length)}
-        onPress={() => setMode('board')}
-      >
-        <Text style={[
-          styles.flowNextButtonText,
-          !(selectedDeck?.shortlist.length) && styles.disabledFlowNextButtonText,
-        ]}>
-          Board
-        </Text>
-        <Ionicons
-          name="analytics-outline"
-          size={18}
-          color={selectedDeck?.shortlist.length ? '#FFFFFF' : '#94A3B8'}
-        />
-      </TouchableOpacity>
     </>
   );
 
@@ -1884,6 +1602,29 @@ export default function PropertyDeckScreen({ route }) {
           </View>
 
           <ScrollView contentContainerStyle={styles.filterModalBody} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity
+              style={styles.preferencesButton}
+              onPress={() => {
+                setFilterModalVisible(false);
+                navigation.navigate('BuyerPreferences', {
+                  scope: 'deck',
+                  propertyDeckId: selectedDeckId,
+                  deckName: selectedDeck?.name || 'Property Deck',
+                });
+              }}
+            >
+              <View style={styles.preferencesButtonIcon}>
+                <Ionicons name="options-outline" size={18} color={APP_PURPLE} />
+              </View>
+              <View style={styles.preferencesButtonTextWrap}>
+                <Text style={styles.preferencesButtonTitle}>Buyer preferences</Text>
+                <Text style={styles.preferencesButtonCopy}>
+                  Review personal fit signals before ranking this deck.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+            </TouchableOpacity>
+
             {renderFilterSection(
               'Property type',
               renderChoiceChips(PROPERTY_TYPE_OPTIONS, deckFilters.propertyType, (key) => setDeckFilterValue('propertyType', key))
@@ -1956,13 +1697,11 @@ export default function PropertyDeckScreen({ route }) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {mode === 'board'
-        ? renderBoardScreen()
-        : mode === 'shortlist'
-          ? renderShortlistScreen()
-          : mode === 'detail'
-            ? renderDetailScreen()
-            : renderListScreen()}
+      {mode === 'shortlist'
+        ? renderShortlistScreen()
+        : mode === 'detail'
+          ? renderDetailScreen()
+          : renderListScreen()}
       {renderPreviewModal()}
       {renderDeckFilterModal()}
     </View>
@@ -2818,6 +2557,38 @@ const styles = StyleSheet.create({
   filterModalBody: {
     padding: 16,
     paddingBottom: 24,
+  },
+  preferencesButton: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginBottom: 18,
+    padding: 12,
+  },
+  preferencesButtonCopy: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  preferencesButtonIcon: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    marginRight: 10,
+    width: 36,
+  },
+  preferencesButtonTextWrap: {
+    flex: 1,
+  },
+  preferencesButtonTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
   },
   filterSection: {
     borderBottomColor: '#E5E7EB',
