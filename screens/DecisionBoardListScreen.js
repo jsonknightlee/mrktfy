@@ -27,7 +27,15 @@ const APP_PURPLE = '#6366F1';
 
 const normalizeImageUrls = (value) => {
   if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (
+        typeof item === 'string'
+          ? item
+          : item?.url || item?.Url || item?.URL || item?.src || item?.uri || item?.Uri
+      ))
+      .filter(Boolean);
+  }
   if (typeof value !== 'string') return [];
 
   const trimmed = value.trim();
@@ -81,6 +89,8 @@ const getListingImageValue = (listing) => (
 const getBoardListingPreview = (boardListing) => (
   boardListing?.listing ||
   boardListing?.Listing ||
+  boardListing?.listingSummary ||
+  boardListing?.ListingSummary ||
   boardListing?.property ||
   boardListing?.Property ||
   boardListing ||

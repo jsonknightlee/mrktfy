@@ -17,6 +17,7 @@ import {
   saveBuyerPreferences,
   skipBuyerPreferences,
 } from '../services/BuyerPreferencesService';
+import { recalculateShortlistRankings } from '../services/PropertyDeckService';
 
 const APP_PURPLE = '#6366F1';
 
@@ -59,7 +60,7 @@ const buildForm = (preference) => ({
 });
 
 const toNullableNumber = (value) => {
-  const trimmed = String(value || '').trim();
+  const trimmed = String(value || '').replace(/[£,\s]/g, '').trim();
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
@@ -105,11 +106,17 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
   };
 
   const save = async () => {
+    const maxBudget = toNullableNumber(form.maxBudget);
+    if (form.maxBudget.trim() && maxBudget === null) {
+      Alert.alert('Check maximum budget', 'Enter your budget as a number, for example 365000 or £365,000.');
+      return;
+    }
+
     setSaving(true);
     try {
       const preference = await saveBuyerPreferences({
         propertyDeckId,
-        maxBudget: toNullableNumber(form.maxBudget),
+        maxBudget,
         minBedrooms: toNullableNumber(form.minBedrooms),
         minBathrooms: toNullableNumber(form.minBathrooms),
         preferredAreasJson: textToList(form.preferredAreasJson),
@@ -124,8 +131,17 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
         mustHaveJson: textToList(form.mustHaveJson),
         niceToHaveJson: textToList(form.niceToHaveJson),
       });
+
+      if (propertyDeckId) {
+        await recalculateShortlistRankings(propertyDeckId, 'Buyer');
+      }
+
       setStatus(preference?.onboardingStatus || 'Completed');
-      Alert.alert('Preferences saved', isDeckScoped ? 'This deck can now use these buyer fit signals.' : 'Your default buyer preferences were saved.');
+      Alert.alert(
+        'Preferences saved',
+        isDeckScoped ? 'This deck can now use these buyer fit signals.' : 'Your default buyer preferences were saved.',
+        [{ text: 'Done', onPress: () => navigation.goBack() }]
+      );
     } catch (error) {
       Alert.alert('Could not save preferences', error?.response?.data?.error || error.message || 'Try again later.');
     } finally {
@@ -138,7 +154,11 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
     try {
       const preference = await skipBuyerPreferences(propertyDeckId);
       setStatus(preference?.onboardingStatus || 'Skipped');
-      Alert.alert('Preferences skipped', 'Mrktfy will show property ranking without personal fit ranking.');
+      Alert.alert(
+        'Preferences skipped',
+        'Mrktfy will show property ranking without personal fit ranking.',
+        [{ text: 'Done', onPress: () => navigation.goBack() }]
+      );
     } catch (error) {
       Alert.alert('Could not skip preferences', error?.response?.data?.error || error.message || 'Try again later.');
     } finally {

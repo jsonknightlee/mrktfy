@@ -27,11 +27,13 @@ import {
   getPropertyDeckLimit,
   getPropertyDecks,
   getShortlist,
+  recalculateShortlistRankings,
   removeFromShortlist,
   renamePropertyDeck,
   restorePropertyDeck,
   saveToShortlist,
 } from '../services/PropertyDeckService';
+import { getBuyerPreferences } from '../services/BuyerPreferencesService';
 
 const APP_PURPLE = '#6366F1';
 const SWIPE_THRESHOLD = 90;
@@ -455,7 +457,7 @@ const listingPassesDeckFilters = (listing, filters) => {
 const getNumericValue = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined || value === '') continue;
-    const numberValue = Number(value);
+    const numberValue = Number(String(value).replace(/[£,\s]/g, ''));
     if (Number.isFinite(numberValue)) return numberValue;
   }
 
@@ -551,6 +553,39 @@ const getUserMatchRating = (listing) => {
   return clampRating(getListingRating(listing) - 7);
 };
 
+const formatRank = (rank) => {
+  const numericRank = getNumericValue(rank);
+  return numericRank !== null && numericRank > 0 ? `#${Math.round(numericRank)}` : null;
+};
+
+const formatPercentage = (score) => {
+  const numericScore = getNumericValue(score);
+  if (numericScore === null) return null;
+
+  return `${clampRating(numericScore > 1 ? numericScore : numericScore * 100)}%`;
+};
+
+const getRankNumber = (listing, rankKey) => {
+  const rank = rankKey === 'yourFit'
+    ? getNumericValue(listing?.yourFitRank, listing?.YourFitRank)
+    : getNumericValue(listing?.propertyRank, listing?.PropertyRank);
+
+  return rank !== null && rank > 0 ? rank : Number.POSITIVE_INFINITY;
+};
+
+const getBuyerBudgetGroup = (listing, buyerPreference) => {
+  const maxBudget = getNumericValue(buyerPreference?.maxBudget, buyerPreference?.MaxBudget);
+  const price = getNumericValue(listing?.Price, listing?.price, listing?.listing?.Price, listing?.listing?.price);
+
+  if (!maxBudget || price === null) return 4;
+  if (price <= maxBudget) return 1;
+
+  const overBudgetPercent = ((price - maxBudget) / maxBudget) * 100;
+  if (overBudgetPercent <= 10) return 2;
+  if (overBudgetPercent <= 20) return 3;
+  return 4;
+};
+
 export default function PropertyDeckScreen({ route }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -561,6 +596,7 @@ export default function PropertyDeckScreen({ route }) {
   const fullListingCacheRef = useRef(new Map());
   const isEnrichingDeckListingsRef = useRef(false);
   const lastRichFilterEnrichmentKeyRef = useRef(null);
+  const shortlistRemovalTimersRef = useRef(new Map());
   const [mode, setMode] = useState('list');
   const [decks, setDecks] = useState([]);
   const [selectedDeckId, setSelectedDeckId] = useState(null);
@@ -572,9 +608,30 @@ export default function PropertyDeckScreen({ route }) {
   const [loading, setLoading] = useState(true);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [deckFilters, setDeckFilters] = useState(createDefaultDeckFilters);
+  const [shortlistSortMode, setShortlistSortMode] = useState('yourFit');
+  const [pendingShortlistRemovals, setPendingShortlistRemovals] = useState({});
+  const [buyerPreference, setBuyerPreference] = useState(null);
 
   const deckLimit = getPropertyDeckLimit(currentTier);
-  const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) || null;
+  const selectedDeck = decks.find((deck) => String(deck.id) === String(selectedDeckId)) || null;
+  const selectedShortlist = selectedDeck?.shortlist || [];
+  const hasYourFitRanks = selectedShortlist.some((listing) => getRankNumber(listing, 'yourFit') !== Number.POSITIVE_INFINITY);
+  const activeShortlistSortMode = shortlistSortMode === 'yourFit' && hasYourFitRanks ? 'yourFit' : 'overall';
+  const sortedShortlist = useMemo(() => (
+    [...selectedShortlist].sort((left, right) => {
+      if (activeShortlistSortMode === 'yourFit') {
+        const leftBudgetGroup = getBuyerBudgetGroup(left, buyerPreference);
+        const rightBudgetGroup = getBuyerBudgetGroup(right, buyerPreference);
+        if (leftBudgetGroup !== rightBudgetGroup) return leftBudgetGroup - rightBudgetGroup;
+      }
+
+      const leftRank = getRankNumber(left, activeShortlistSortMode);
+      const rightRank = getRankNumber(right, activeShortlistSortMode);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+
+      return getUserMatchRating(right) - getUserMatchRating(left);
+    })
+  ), [activeShortlistSortMode, buyerPreference, selectedShortlist]);
   const activeDecks = decks.filter((deck) => !isDeckDeleted(deck));
   const deletedDecks = decks.filter(isDeckDeleted);
   const filteredDeckListings = useMemo(
@@ -649,8 +706,34 @@ export default function PropertyDeckScreen({ route }) {
       });
     }
 
+    try {
+      const preference = await getBuyerPreferences(deckId);
+      setBuyerPreference(preference);
+    } catch (error) {
+      console.log('[PROPERTY-DECK] load buyer preference failed:', {
+        deckId,
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+      setBuyerPreference(null);
+    }
+
+    if (nextShortlist.length) {
+      try {
+        nextShortlist = await recalculateShortlistRankings(deckId, 'Buyer', userProfile);
+      } catch (error) {
+        console.log('[PROPERTY-DECK] recalculate shortlist rankings failed:', {
+          deckId,
+          status: error?.response?.status,
+          data: error?.response?.data,
+          message: error?.message,
+        });
+      }
+    }
+
     setDecks(nextDecks.map((deck) => (
-      deck.id === deckId
+      String(deck.id) === String(deckId)
         ? { ...deck, shortlist: nextShortlist, shortlistCount: nextShortlist.length }
         : deck
     )));
@@ -664,6 +747,11 @@ export default function PropertyDeckScreen({ route }) {
     setCurrentIndex(0);
     pan.setValue({ x: 0, y: 0 });
   }, [deckFilters, pan]);
+
+  useEffect(() => () => {
+    shortlistRemovalTimersRef.current.forEach((timer) => clearTimeout(timer));
+    shortlistRemovalTimersRef.current.clear();
+  }, []);
 
   useEffect(() => {
     if (
@@ -1032,11 +1120,49 @@ export default function PropertyDeckScreen({ route }) {
     },
   }), [completeSwipe, pan]);
 
-  const handleRemoveFromShortlist = async (listingId) => {
-    if (!selectedDeckId) return;
+  const handleRemoveFromShortlist = (listingId) => {
+    if (!selectedDeckId || !listingId || shortlistRemovalTimersRef.current.has(listingId)) return;
 
-    await removeFromShortlist(selectedDeckId, listingId, userProfile);
-    await loadSelectedDeck(selectedDeckId);
+    setPendingShortlistRemovals((current) => ({
+      ...current,
+      [listingId]: true,
+    }));
+
+    const timer = setTimeout(async () => {
+      shortlistRemovalTimersRef.current.delete(listingId);
+      setPendingShortlistRemovals((current) => {
+        const next = { ...current };
+        delete next[listingId];
+        return next;
+      });
+
+      try {
+        await removeFromShortlist(selectedDeckId, listingId, userProfile);
+        await loadSelectedDeck(selectedDeckId);
+      } catch (error) {
+        console.log('[PROPERTY-DECK] remove shortlist item failed:', {
+          listingId,
+          status: error?.response?.status,
+          data: error?.response?.data,
+          message: error?.message,
+        });
+        Alert.alert('Could not remove from shortlist', getDeckActionErrorMessage(error));
+      }
+    }, 15000);
+
+    shortlistRemovalTimersRef.current.set(listingId, timer);
+  };
+
+  const undoRemoveFromShortlist = (listingId) => {
+    const timer = shortlistRemovalTimersRef.current.get(listingId);
+    if (timer) clearTimeout(timer);
+
+    shortlistRemovalTimersRef.current.delete(listingId);
+    setPendingShortlistRemovals((current) => {
+      const next = { ...current };
+      delete next[listingId];
+      return next;
+    });
   };
 
   const openDecisionBoard = async (listing) => {
@@ -1048,6 +1174,16 @@ export default function PropertyDeckScreen({ route }) {
       pendingSource: {
         shortListId: listing.shortListId || listing.ShortListID,
         sourceFlow: 'propertyDeck',
+        suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
+      },
+    });
+  };
+
+  const openDecisionBoardsForDeck = () => {
+    navigation.navigate('DecisionBoards', {
+      pendingSource: {
+        sourceFlow: 'propertyDeck',
+        propertyDeckId: selectedDeckId,
         suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
       },
     });
@@ -1383,16 +1519,28 @@ export default function PropertyDeckScreen({ route }) {
   const renderShortlistItem = ({ item, index }) => {
     const imageUrl = normalizeImageUrls(item)[0];
     const listingId = getListingId(item);
-    const propertyRating = getListingRating(item);
-    const userRating = getUserMatchRating(item);
+    const isPendingRemoval = Boolean(listingId && pendingShortlistRemovals[listingId]);
+    const propertyRank = formatRank(item.propertyRank ?? item.PropertyRank);
+    const yourFitRank = formatRank(item.yourFitRank ?? item.YourFitRank);
+    const propertyRating = propertyRank || getListingRating(item);
+    const userRating = activeShortlistSortMode === 'yourFit' ? `#${index + 1}` : (yourFitRank || getUserMatchRating(item));
+    const matchScore = formatPercentage(item.matchScore ?? item.MatchScore);
+    const confidenceScore = formatPercentage(item.confidenceScore ?? item.ConfidenceScore);
+    const rankingMeta = [matchScore && `${matchScore} match`, confidenceScore && `${confidenceScore} confidence`]
+      .filter(Boolean)
+      .join(' / ');
     const distanceText = formatSearchDistance(item);
 
     return (
       <TouchableOpacity
-        style={styles.shortlistItem}
+        style={[styles.shortlistItem, isPendingRemoval && styles.shortlistItemPendingRemoval]}
         activeOpacity={0.9}
-        onPress={() => openListingPreview(item)}
-        onLongPress={() => openFullListing(item)}
+        onPress={() => {
+          if (!isPendingRemoval) openListingPreview(item);
+        }}
+        onLongPress={() => {
+          if (!isPendingRemoval) openFullListing(item);
+        }}
       >
         <Text style={styles.shortlistRank}>#{index + 1}</Text>
         {imageUrl ? (
@@ -1413,22 +1561,46 @@ export default function PropertyDeckScreen({ route }) {
           </Text>
           <View style={styles.shortlistScoreRow}>
             <View style={styles.compactScorePill}>
-              <Text style={styles.compactScoreLabel}>Property</Text>
+              <Text style={styles.compactScoreLabel}>Overall</Text>
               <Text style={styles.compactScoreValue}>{propertyRating}</Text>
             </View>
             <View style={[styles.compactScorePill, styles.compactUserScorePill]}>
-              <Text style={[styles.compactScoreLabel, styles.compactUserScoreLabel]}>Your fit</Text>
+              <Text style={[styles.compactScoreLabel, styles.compactUserScoreLabel]}>For you</Text>
               <Text style={[styles.compactScoreValue, styles.compactUserScoreValue]}>{userRating}</Text>
             </View>
           </View>
+          {!!rankingMeta && (
+            <Text style={styles.rankingMetaText} numberOfLines={1}>{rankingMeta}</Text>
+          )}
+          {!isPendingRemoval && (
+            <TouchableOpacity
+              style={styles.shortlistDecisionButton}
+              onPress={() => openDecisionBoard(item)}
+            >
+              <Ionicons name="git-branch-outline" size={16} color={APP_PURPLE} />
+              <Text style={styles.shortlistDecisionButtonText}>Add to Decision Board</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        <TouchableOpacity
-          style={styles.removeButton}
-          onPress={() => handleRemoveFromShortlist(listingId)}
-        >
-          <Ionicons name="trash-outline" size={18} color="#EF4444" />
-        </TouchableOpacity>
+        {isPendingRemoval ? (
+          <TouchableOpacity
+            style={styles.undoRemoveButton}
+            onPress={() => undoRemoveFromShortlist(listingId)}
+          >
+            <Ionicons name="arrow-undo-outline" size={17} color={APP_PURPLE} />
+            <Text style={styles.undoRemoveButtonText}>Undo</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.shortlistActionColumn}>
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => handleRemoveFromShortlist(listingId)}
+            >
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -1497,8 +1669,56 @@ export default function PropertyDeckScreen({ route }) {
 
       {renderFlowSteps()}
 
+      <View style={styles.shortlistSortBar}>
+        <Text style={styles.shortlistSortLabel}>Order by</Text>
+        <View style={styles.shortlistSortOptions}>
+          <TouchableOpacity
+            style={[
+              styles.shortlistSortOption,
+              activeShortlistSortMode === 'yourFit' && styles.shortlistSortOptionActive,
+              !hasYourFitRanks && styles.shortlistSortOptionDisabled,
+            ]}
+            onPress={() => setShortlistSortMode('yourFit')}
+            disabled={!hasYourFitRanks}
+          >
+            <Text
+              style={[
+                styles.shortlistSortOptionText,
+                activeShortlistSortMode === 'yourFit' && styles.shortlistSortOptionTextActive,
+                !hasYourFitRanks && styles.shortlistSortOptionTextDisabled,
+              ]}
+            >
+              For you
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.shortlistSortOption,
+              activeShortlistSortMode === 'overall' && styles.shortlistSortOptionActive,
+            ]}
+            onPress={() => setShortlistSortMode('overall')}
+          >
+            <Text
+              style={[
+                styles.shortlistSortOptionText,
+                activeShortlistSortMode === 'overall' && styles.shortlistSortOptionTextActive,
+              ]}
+            >
+              Overall
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={styles.shortlistBoardButton}
+          onPress={openDecisionBoardsForDeck}
+        >
+          <Ionicons name="git-branch-outline" size={16} color="#FFFFFF" />
+          <Text style={styles.shortlistBoardButtonText}>Decision Board</Text>
+        </TouchableOpacity>
+      </View>
+
       <FlatList
-        data={selectedDeck?.shortlist || []}
+        data={sortedShortlist}
         renderItem={renderShortlistItem}
         keyExtractor={(item, index) => getListingId(item) || `shortlist-${index}`}
         contentContainerStyle={styles.shortlistScreenList}
@@ -2007,6 +2227,68 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 96,
   },
+  shortlistSortBar: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderBottomColor: '#E5E7EB',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  shortlistSortLabel: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  shortlistSortOptions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  shortlistBoardButton: {
+    alignItems: 'center',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 8,
+    flexDirection: 'row',
+    minHeight: 34,
+    paddingHorizontal: 12,
+  },
+  shortlistBoardButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 6,
+  },
+  shortlistSortOption: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  shortlistSortOptionActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+  },
+  shortlistSortOptionDisabled: {
+    opacity: 0.45,
+  },
+  shortlistSortOptionText: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  shortlistSortOptionTextActive: {
+    color: APP_PURPLE,
+  },
+  shortlistSortOptionTextDisabled: {
+    color: '#94A3B8',
+  },
   columnsContainer: {
     flex: 1,
     flexDirection: 'row',
@@ -2130,6 +2412,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     overflow: 'hidden',
   },
+  shortlistItemPendingRemoval: {
+    backgroundColor: '#F8FAFC',
+    opacity: 0.78,
+  },
   shortlistRank: {
     color: '#64748B',
     fontSize: 11,
@@ -2193,20 +2479,71 @@ const styles = StyleSheet.create({
   compactUserScoreValue: {
     color: APP_PURPLE,
   },
+  rankingMetaText: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 5,
+  },
+  shortlistDecisionButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    flexDirection: 'row',
+    marginTop: 8,
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  shortlistDecisionButtonText: {
+    color: APP_PURPLE,
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 6,
+  },
   removeButton: {
     alignItems: 'center',
     height: 40,
     justifyContent: 'center',
     width: 34,
   },
+  undoRemoveButton: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderLeftColor: '#C7D2FE',
+    borderLeftWidth: 1,
+    height: '100%',
+    justifyContent: 'center',
+    width: 62,
+  },
+  undoRemoveButtonText: {
+    color: APP_PURPLE,
+    fontSize: 11,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  shortlistActionColumn: {
+    alignItems: 'center',
+    borderLeftColor: '#E5E7EB',
+    borderLeftWidth: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
   decisionButton: {
     alignItems: 'center',
     backgroundColor: '#EEF2FF',
     borderRadius: 8,
-    height: 36,
+    minHeight: 44,
     justifyContent: 'center',
     marginRight: 4,
-    width: 36,
+    paddingHorizontal: 6,
+    width: 70,
+  },
+  decisionButtonText: {
+    color: APP_PURPLE,
+    fontSize: 10,
+    fontWeight: '900',
+    marginTop: 2,
   },
   disabledDecisionButton: {
     backgroundColor: '#F1F5F9',

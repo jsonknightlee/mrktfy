@@ -32,7 +32,6 @@ const APP_PURPLE = '#6366F1';
 const FLOW_STEPS = [
   { key: 'deck', label: 'Property Deck' },
   { key: 'shortlist', label: 'Shortlist' },
-  { key: 'board', label: 'Board' },
   { key: 'decision', label: 'Decision' },
 ];
 
@@ -53,7 +52,15 @@ const EMPTY_CONTACT_FORM = {
 
 const normalizeImageUrls = (value) => {
   if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (
+        typeof item === 'string'
+          ? item
+          : item?.url || item?.Url || item?.URL || item?.src || item?.uri || item?.Uri
+      ))
+      .filter(Boolean);
+  }
   if (typeof value !== 'string') return [];
 
   const trimmed = value.trim();
@@ -76,18 +83,24 @@ const getListingPrice = (listing) => listing?.Price || listing?.price || '';
 const getListingImageValue = (listing) => (
   listing?.ImageUrls ||
   listing?.imageUrls ||
+  listing?.image_urls ||
   listing?.Images ||
   listing?.images ||
   listing?.ImageUrl ||
   listing?.imageUrl ||
+  listing?.image_url ||
   listing?.PrimaryImageUrl ||
   listing?.primaryImageUrl ||
+  listing?.primary_image_url ||
   listing?.MainImageUrl ||
   listing?.mainImageUrl ||
+  listing?.main_image_url ||
   listing?.PhotoUrl ||
   listing?.photoUrl ||
+  listing?.photo_url ||
   listing?.ThumbnailUrl ||
-  listing?.thumbnailUrl
+  listing?.thumbnailUrl ||
+  listing?.thumbnail_url
 );
 const statusToTrafficLight = (status) => (status === 'Closed' ? 'Red' : status === 'Tentative' ? 'Orange' : 'Green');
 const getBoardAgentId = (agent) => String(agent?.decisionBoardAgentId || agent?.DecisionBoardAgentID || agent?.id || '');
@@ -102,8 +115,11 @@ export default function DecisionBoardScreen({ route, navigation }) {
   const [saving, setSaving] = useState(false);
   const [contactModal, setContactModal] = useState({ visible: false, type: 'agent', item: null });
   const [contactForm, setContactForm] = useState(EMPTY_CONTACT_FORM);
+  const [selectedCompareIds, setSelectedCompareIds] = useState([]);
+  const [compareModalVisible, setCompareModalVisible] = useState(false);
 
   const listings = board?.listings || [];
+  const selectedCompareListings = listings.filter((item) => selectedCompareIds.includes(String(item.id || item.listingId)));
   const activeCount = listings.filter((item) => item.listingStatus !== 'Closed').length;
   const progressPercent = board?.maxProperties ? Math.round((activeCount / board.maxProperties) * 100) : 0;
 
@@ -170,6 +186,19 @@ export default function DecisionBoardScreen({ route, navigation }) {
       Alert.alert('Property update failed', error?.response?.data?.error || error?.message || 'Could not update this property.');
       loadBoard();
     }
+  };
+
+  const toggleCompareSelection = (item) => {
+    const id = String(item?.id || item?.listingId || '');
+    if (!id) return;
+
+    setSelectedCompareIds((current) => {
+      if (current.includes(id)) {
+        return current.filter((selectedId) => selectedId !== id);
+      }
+
+      return [...current.slice(-1), id];
+    });
   };
 
   const openContactModal = (type, item = null) => {
@@ -354,6 +383,8 @@ export default function DecisionBoardScreen({ route, navigation }) {
     const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
     const lightKey = item.trafficLightStatus || statusToTrafficLight(item.listingStatus);
     const light = TRAFFIC_LIGHT[lightKey] || TRAFFIC_LIGHT.Green;
+    const compareId = String(item.id || item.listingId || '');
+    const isSelectedForCompare = selectedCompareIds.includes(compareId);
 
     return (
       <TouchableOpacity
@@ -394,8 +425,49 @@ export default function DecisionBoardScreen({ route, navigation }) {
             ))}
           </View>
         </View>
+        <TouchableOpacity
+          style={[styles.compareSelectButton, isSelectedForCompare && styles.compareSelectButtonSelected]}
+          onPress={() => toggleCompareSelection(item)}
+        >
+          <Ionicons
+            name={isSelectedForCompare ? 'checkmark' : 'git-compare-outline'}
+            size={17}
+            color={isSelectedForCompare ? '#FFFFFF' : APP_PURPLE}
+          />
+        </TouchableOpacity>
         <Ionicons name="chevron-forward" size={18} color="#94A3B8" style={styles.propertyChevron} />
       </TouchableOpacity>
+    );
+  };
+
+  const renderCompareCard = (item) => {
+    const listing = item?.listing || item || {};
+    const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
+    const lightKey = item?.trafficLightStatus || statusToTrafficLight(item?.listingStatus);
+    const light = TRAFFIC_LIGHT[lightKey] || TRAFFIC_LIGHT.Green;
+
+    return (
+      <View key={item?.id || item?.listingId} style={styles.compareCard}>
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} style={styles.compareImage} />
+        ) : (
+          <View style={[styles.compareImage, styles.placeholderImage]}>
+            <Ionicons name="home-outline" size={24} color="#CBD5E1" />
+          </View>
+        )}
+        <View style={styles.compareBody}>
+          <Text style={styles.comparePrice}>{String(getListingPrice(listing))}</Text>
+          <Text style={styles.compareTitle} numberOfLines={3}>{getListingTitle(listing)}</Text>
+          <View style={styles.statusLine}>
+            <View style={[styles.statusDot, { backgroundColor: light.color }]} />
+            <Text style={styles.propertyMeta}>{light.label}</Text>
+          </View>
+          <Text style={styles.compareMeta}>Listing: {item?.listingStatus || 'Active'}</Text>
+          <Text style={styles.compareMeta}>Viewing: {item?.viewingStatus || 'Not arranged'}</Text>
+          <Text style={styles.compareMeta}>Verdict: {item?.userVerdict || 'Unset'}</Text>
+          {!!item?.notes && <Text style={styles.compareNotes} numberOfLines={4}>{item.notes}</Text>}
+        </View>
+      </View>
     );
   };
 
@@ -463,7 +535,22 @@ export default function DecisionBoardScreen({ route, navigation }) {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Decision Board Listings</Text>
+          <View style={styles.sectionHeaderRow}>
+            <View>
+              <Text style={styles.sectionTitle}>Decision Board Listings</Text>
+              <Text style={styles.sectionHint}>Select 2 properties to compare</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.compareOpenButton, selectedCompareIds.length !== 2 && styles.disabledButton]}
+              onPress={() => setCompareModalVisible(true)}
+              disabled={selectedCompareIds.length !== 2}
+            >
+              <Ionicons name="git-compare-outline" size={17} color={selectedCompareIds.length === 2 ? '#FFFFFF' : '#94A3B8'} />
+              <Text style={[styles.compareOpenButtonText, selectedCompareIds.length !== 2 && styles.disabledButtonText]}>
+                Compare
+              </Text>
+            </TouchableOpacity>
+          </View>
           {listings.length ? listings.map(renderDecisionListing) : (
             <View style={styles.emptyPanel}>
               <Text style={styles.emptyPanelTitle}>No properties yet</Text>
@@ -532,6 +619,30 @@ export default function DecisionBoardScreen({ route, navigation }) {
           )}
         </View>
       </ScrollView>
+      <Modal visible={compareModalVisible} transparent animationType="slide" onRequestClose={() => setCompareModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Compare properties</Text>
+              <TouchableOpacity style={styles.headerIconButton} onPress={() => setCompareModalVisible(false)}>
+                <Ionicons name="close" size={22} color="#111827" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.compareModalBody} showsVerticalScrollIndicator={false}>
+              {selectedCompareListings.length === 2 ? (
+                <View style={styles.compareGrid}>
+                  {selectedCompareListings.map(renderCompareCard)}
+                </View>
+              ) : (
+                <View style={styles.emptyPanel}>
+                  <Text style={styles.emptyPanelTitle}>Select two properties</Text>
+                  <Text style={styles.emptyPanelText}>Use the compare icons on Decision Board listings to choose candidates.</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={contactModal.visible} transparent animationType="slide" onRequestClose={closeContactModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -613,6 +724,10 @@ const styles = StyleSheet.create({
   statusDot: { borderRadius: 999, height: 9, marginRight: 6, width: 9 },
   propertyMeta: { color: '#64748B', fontSize: 11, fontWeight: '800' },
   propertyChevron: { marginRight: 10 },
+  compareSelectButton: { alignItems: 'center', backgroundColor: '#EEF2FF', borderRadius: 8, height: 34, justifyContent: 'center', marginRight: 6, width: 34 },
+  compareSelectButtonSelected: { backgroundColor: APP_PURPLE },
+  compareOpenButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, flexDirection: 'row', minHeight: 36, paddingHorizontal: 12 },
+  compareOpenButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', marginLeft: 6 },
   miniStatusRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
   miniStatusButton: { backgroundColor: '#F1F5F9', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 5 },
   miniStatusButtonSelected: { backgroundColor: '#EEF2FF' },
@@ -641,6 +756,15 @@ const styles = StyleSheet.create({
   modalHeader: { alignItems: 'center', borderBottomColor: '#E5E7EB', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
   modalTitle: { color: '#111827', fontSize: 16, fontWeight: '900' },
   modalBody: { gap: 8, padding: 16 },
+  compareModalBody: { padding: 16, paddingBottom: 28 },
+  compareGrid: { flexDirection: 'row', gap: 10 },
+  compareCard: { backgroundColor: '#F8FAFC', borderColor: '#E5E7EB', borderRadius: 8, borderWidth: 1, flex: 1, overflow: 'hidden' },
+  compareImage: { backgroundColor: '#EEF2F7', height: 110, width: '100%' },
+  compareBody: { padding: 10 },
+  comparePrice: { color: APP_PURPLE, fontSize: 14, fontWeight: '900' },
+  compareTitle: { color: '#111827', fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 5 },
+  compareMeta: { color: '#64748B', fontSize: 11, fontWeight: '800', marginTop: 6 },
+  compareNotes: { color: '#475569', fontSize: 11, fontWeight: '700', lineHeight: 16, marginTop: 8 },
   modalSaveButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, justifyContent: 'center', marginTop: 6, minHeight: 44 },
   modalSaveButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
 });

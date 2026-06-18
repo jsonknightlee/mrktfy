@@ -41,7 +41,15 @@ const TRAFFIC_LIGHT = {
 
 const normalizeImageUrls = (value) => {
   if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (
+        typeof item === 'string'
+          ? item
+          : item?.url || item?.Url || item?.URL || item?.src || item?.uri || item?.Uri
+      ))
+      .filter(Boolean);
+  }
   if (typeof value !== 'string') return [];
 
   const trimmed = value.trim();
@@ -71,18 +79,24 @@ const getListingPrice = (listing) => listing?.Price || listing?.price || '';
 const getListingImageValue = (listing) => (
   listing?.ImageUrls ||
   listing?.imageUrls ||
+  listing?.image_urls ||
   listing?.Images ||
   listing?.images ||
   listing?.ImageUrl ||
   listing?.imageUrl ||
+  listing?.image_url ||
   listing?.PrimaryImageUrl ||
   listing?.primaryImageUrl ||
+  listing?.primary_image_url ||
   listing?.MainImageUrl ||
   listing?.mainImageUrl ||
+  listing?.main_image_url ||
   listing?.PhotoUrl ||
   listing?.photoUrl ||
+  listing?.photo_url ||
   listing?.ThumbnailUrl ||
-  listing?.thumbnailUrl
+  listing?.thumbnailUrl ||
+  listing?.thumbnail_url
 );
 const getTaskDone = (task) => String(task?.status || '').toLowerCase() === 'completed';
 const statusToTrafficLight = (status) => (status === 'Closed' ? 'Red' : status === 'Tentative' ? 'Orange' : 'Green');
@@ -271,6 +285,13 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
   useEffect(() => {
     const listingId = decisionListing?.listingId || decisionListing?.ListingID || listing?.ID;
     if (!listingId) return;
+    if (
+      getListingTitle(decisionListing?.listing) !== 'Decision property' &&
+      getListingPrice(decisionListing?.listing) &&
+      normalizeImageUrls(getListingImageValue(decisionListing?.listing)).length
+    ) {
+      return;
+    }
 
     setLoadingListing(true);
     getListingById(listingId)

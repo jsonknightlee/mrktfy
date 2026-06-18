@@ -44,6 +44,34 @@ const requireId = (value, label) => {
   }
 };
 
+const normalizeImageUrls = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (
+        typeof item === 'string'
+          ? item
+          : item?.url || item?.Url || item?.URL || item?.src || item?.uri || item?.Uri
+      ))
+      .filter(Boolean);
+  }
+  if (typeof value !== 'string') return [];
+
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return trimmed.split(/[,|;]+/).map((item) => item.trim()).filter(Boolean);
+};
+
 const normalizeListing = (listing) => {
   if (!listing || typeof listing !== 'object') return listing || null;
 
@@ -75,15 +103,16 @@ const normalizeListing = (listing) => {
     ID: stringifyId(getValue(listing, ['ID', 'id', 'ListingID', 'listingId'])),
     Title: getValue(listing, ['Title', 'title', 'Address', 'address'], ''),
     Price: getValue(listing, ['Price', 'price'], null),
-    ImageUrls: imageUrls,
+    ImageUrls: normalizeImageUrls(imageUrls),
   };
 };
 
 export const normalizeDecisionBoardListing = (item) => {
   if (!item || typeof item !== 'object') return null;
 
-  const hasNestedListing = Boolean(item.listing || item.Listing);
-  const listing = normalizeListing(getValue(item, ['listing', 'Listing'], item));
+  const nestedListing = getValue(item, ['listing', 'Listing', 'listingSummary', 'ListingSummary'], null);
+  const hasNestedListing = Boolean(nestedListing);
+  const listing = normalizeListing(hasNestedListing ? { ...item, ...nestedListing } : item);
   const trafficLightStatus = getValue(item, ['trafficLightStatus', 'TrafficLightStatus'], null);
   const listingStatus = getValue(item, ['listingStatus', 'ListingStatus'], 'Active');
   const listingId = stringifyId(getValue(item, ['listingId', 'ListingID'], listing?.ID));
