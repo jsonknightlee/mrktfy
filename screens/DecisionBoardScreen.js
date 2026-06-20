@@ -106,6 +106,93 @@ const statusToTrafficLight = (status) => (status === 'Closed' ? 'Red' : status =
 const getBoardAgentId = (agent) => String(agent?.decisionBoardAgentId || agent?.DecisionBoardAgentID || agent?.id || '');
 const getBoardBrokerId = (broker) => String(broker?.decisionBoardBrokerId || broker?.DecisionBoardBrokerID || broker?.id || '');
 
+const parseJsonObject = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const getNumericValue = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+};
+
+const formatRank = (rank) => (rank ? `#${rank}` : 'Unranked');
+const formatPercent = (value) => {
+  if (value === null || value === undefined) return 'n/a';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 'n/a';
+  return `${Math.round(number)}%`;
+};
+
+const getCompareRanking = (item, listing) => {
+  const scoreBreakdown = parseJsonObject(
+    item?.scoreBreakdownJson ||
+    item?.ScoreBreakdownJson ||
+    listing?.scoreBreakdownJson ||
+    listing?.ScoreBreakdownJson
+  );
+  const personalised = scoreBreakdown?.personalised || scoreBreakdown?.personalized || {};
+  const property = scoreBreakdown?.property || {};
+
+  return {
+    propertyRank: getNumericValue(item?.propertyRank, item?.PropertyRank, listing?.propertyRank, listing?.PropertyRank, property?.rank),
+    yourFitRank: getNumericValue(item?.yourFitRank, item?.YourFitRank, listing?.yourFitRank, listing?.YourFitRank, personalised?.rank),
+    matchScore: getNumericValue(item?.matchScore, item?.MatchScore, listing?.matchScore, listing?.MatchScore, personalised?.matchScore, property?.matchScore),
+    confidenceScore: getNumericValue(item?.confidenceScore, item?.ConfidenceScore, listing?.confidenceScore, listing?.ConfidenceScore, personalised?.confidenceScore, property?.confidenceScore),
+    scoreBreakdown,
+    explanation: item?.rankingExplanation || item?.RankingExplanation || listing?.rankingExplanation || listing?.RankingExplanation || personalised?.rankingExplanation || property?.rankingExplanation,
+  };
+};
+
+const getCompareProsCons = (ranking, item) => {
+  const pros = [];
+  const cons = [];
+  const personalised = ranking.scoreBreakdown?.personalised || ranking.scoreBreakdown?.personalized || {};
+  const breakdown = personalised?.breakdown || {};
+  const components = Array.isArray(breakdown?.components) ? breakdown.components : [];
+
+  if (ranking.yourFitRank) pros.push(`Your fit ${formatRank(ranking.yourFitRank)}`);
+  if (ranking.propertyRank) pros.push(`Deck rank ${formatRank(ranking.propertyRank)}`);
+  if (ranking.matchScore !== null && ranking.matchScore >= 75) pros.push(`Strong match at ${formatPercent(ranking.matchScore)}`);
+  if (ranking.confidenceScore !== null && ranking.confidenceScore < 60) cons.push(`Lower confidence at ${formatPercent(ranking.confidenceScore)}`);
+
+  components.forEach((component) => {
+    const score = getNumericValue(component?.score);
+    const label = component?.label || component?.key || 'Fit signal';
+    if (score === null) return;
+    if (score >= 75 && pros.length < 4) pros.push(`Strong ${String(label).toLowerCase()}`);
+    if (score < 55 && cons.length < 4) cons.push(`Weak ${String(label).toLowerCase()}`);
+  });
+
+  const budget = breakdown?.budget || {};
+  const overBudgetPercent = getNumericValue(budget?.overBudgetPercent);
+  if (overBudgetPercent && overBudgetPercent > 0) cons.unshift(`Over budget by ${Math.round(overBudgetPercent)}%`);
+
+  const bedrooms = breakdown?.bedrooms || {};
+  const missingBeds = getNumericValue(bedrooms?.missingBeds);
+  if (missingBeds && missingBeds > 0) cons.push(`Missing ${missingBeds} bedroom${missingBeds === 1 ? '' : 's'}`);
+
+  const lightKey = item?.trafficLightStatus || statusToTrafficLight(item?.listingStatus);
+  if (lightKey === 'Green') pros.push('Active decision option');
+  if (item?.viewingStatus && item.viewingStatus !== 'Not arranged') pros.push(item.viewingStatus);
+
+  return {
+    pros: [...new Set(pros)].slice(0, 3),
+    cons: [...new Set(cons)].slice(0, 3),
+  };
+};
+
 export default function DecisionBoardScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const initialBoard = route.params?.decisionBoard || null;
@@ -445,6 +532,8 @@ export default function DecisionBoardScreen({ route, navigation }) {
     const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
     const lightKey = item?.trafficLightStatus || statusToTrafficLight(item?.listingStatus);
     const light = TRAFFIC_LIGHT[lightKey] || TRAFFIC_LIGHT.Green;
+    const ranking = getCompareRanking(item, listing);
+    const signals = getCompareProsCons(ranking, item);
 
     return (
       <View key={item?.id || item?.listingId} style={styles.compareCard}>
@@ -465,6 +554,44 @@ export default function DecisionBoardScreen({ route, navigation }) {
           <Text style={styles.compareMeta}>Listing: {item?.listingStatus || 'Active'}</Text>
           <Text style={styles.compareMeta}>Viewing: {item?.viewingStatus || 'Not arranged'}</Text>
           <Text style={styles.compareMeta}>Verdict: {item?.userVerdict || 'Unset'}</Text>
+          <View style={styles.compareRankGrid}>
+            <View style={styles.compareRankPill}>
+              <Text style={styles.compareRankLabel}>Your fit</Text>
+              <Text style={styles.compareRankValue}>{formatRank(ranking.yourFitRank)}</Text>
+            </View>
+            <View style={styles.compareRankPill}>
+              <Text style={styles.compareRankLabel}>Deck</Text>
+              <Text style={styles.compareRankValue}>{formatRank(ranking.propertyRank)}</Text>
+            </View>
+            <View style={styles.compareRankPill}>
+              <Text style={styles.compareRankLabel}>Match</Text>
+              <Text style={styles.compareRankValue}>{formatPercent(ranking.matchScore)}</Text>
+            </View>
+            <View style={styles.compareRankPill}>
+              <Text style={styles.compareRankLabel}>Confidence</Text>
+              <Text style={styles.compareRankValue}>{formatPercent(ranking.confidenceScore)}</Text>
+            </View>
+          </View>
+          <View style={styles.compareSignals}>
+            <View style={styles.compareSignalColumn}>
+              <Text style={styles.compareSignalTitle}>Pros</Text>
+              {(signals.pros.length ? signals.pros : ['No strong pros yet']).map((signal) => (
+                <View key={`pro-${signal}`} style={styles.compareSignalLine}>
+                  <View style={[styles.compareSignalDot, styles.compareProDot]} />
+                  <Text style={styles.compareSignalText}>{signal}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.compareSignalColumn}>
+              <Text style={styles.compareSignalTitle}>Cons</Text>
+              {(signals.cons.length ? signals.cons : ['No major cons yet']).map((signal) => (
+                <View key={`con-${signal}`} style={styles.compareSignalLine}>
+                  <View style={[styles.compareSignalDot, styles.compareConDot]} />
+                  <Text style={styles.compareSignalText}>{signal}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
           {!!item?.notes && <Text style={styles.compareNotes} numberOfLines={4}>{item.notes}</Text>}
         </View>
       </View>
@@ -764,6 +891,18 @@ const styles = StyleSheet.create({
   comparePrice: { color: APP_PURPLE, fontSize: 14, fontWeight: '900' },
   compareTitle: { color: '#111827', fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 5 },
   compareMeta: { color: '#64748B', fontSize: 11, fontWeight: '800', marginTop: 6 },
+  compareRankGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  compareRankPill: { backgroundColor: '#EEF2FF', borderRadius: 7, minWidth: 58, paddingHorizontal: 7, paddingVertical: 6 },
+  compareRankLabel: { color: '#64748B', fontSize: 9, fontWeight: '900', textTransform: 'uppercase' },
+  compareRankValue: { color: APP_PURPLE, fontSize: 12, fontWeight: '900', marginTop: 2 },
+  compareSignals: { gap: 8, marginTop: 10 },
+  compareSignalColumn: { backgroundColor: '#FFFFFF', borderColor: '#E5E7EB', borderRadius: 8, borderWidth: 1, padding: 8 },
+  compareSignalTitle: { color: '#111827', fontSize: 11, fontWeight: '900', marginBottom: 5 },
+  compareSignalLine: { alignItems: 'flex-start', flexDirection: 'row', marginTop: 4 },
+  compareSignalDot: { borderRadius: 999, height: 6, marginRight: 6, marginTop: 5, width: 6 },
+  compareProDot: { backgroundColor: '#22C55E' },
+  compareConDot: { backgroundColor: '#EF4444' },
+  compareSignalText: { color: '#475569', flex: 1, fontSize: 10, fontWeight: '700', lineHeight: 14 },
   compareNotes: { color: '#475569', fontSize: 11, fontWeight: '700', lineHeight: 16, marginTop: 8 },
   modalSaveButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, justifyContent: 'center', marginTop: 6, minHeight: 44 },
   modalSaveButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },

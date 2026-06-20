@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   FlatList,
@@ -17,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { askBuyerWorkspaceAssistant } from '../services/BuyerWorkspaceService';
 import { getListingById } from '../services/listingApi';
 import {
   archivePropertyDeck,
@@ -27,13 +29,11 @@ import {
   getPropertyDeckLimit,
   getPropertyDecks,
   getShortlist,
-  recalculateShortlistRankings,
   removeFromShortlist,
   renamePropertyDeck,
   restorePropertyDeck,
   saveToShortlist,
 } from '../services/PropertyDeckService';
-import { getBuyerPreferences } from '../services/BuyerPreferencesService';
 
 const APP_PURPLE = '#6366F1';
 const SWIPE_THRESHOLD = 90;
@@ -42,7 +42,150 @@ const FLOW_STEPS = [
   { key: 'detail', label: 'Property Deck' },
   { key: 'shortlist', label: 'Shortlist' },
   { key: 'decision', label: 'Decision' },
+  { key: 'buy', label: 'Buy' },
 ];
+
+const BUY_CHECKLIST = [
+  {
+    title: 'Mortgage In Principle',
+    status: 'In Progress',
+    tasks: ['Obtain an Agreement in Principle', 'Confirm borrowing capacity', 'Compare mortgage products', 'Save lender details'],
+    questions: ['Can I comfortably afford this property?', 'What happens if rates rise?'],
+  },
+  {
+    title: 'Research Affordability',
+    status: 'Not Started',
+    tasks: ['Review deposit requirements', 'Estimate monthly repayments', 'Review legal costs', 'Review moving costs', 'Review stamp duty implications'],
+    questions: ['Can I comfortably afford this property?', 'What happens if rates rise?'],
+  },
+  {
+    title: 'Arrange Property Viewings',
+    status: 'Not Started',
+    tasks: ['First viewing', 'Second viewing', 'Evening viewing', 'Weekend viewing'],
+    questions: ['Noise', 'Parking', 'Neighbours', 'Mobile signal', 'Traffic', 'Local amenities'],
+  },
+  {
+    title: 'Choose Conveyancer / Solicitor',
+    status: 'Not Started',
+    tasks: ['Obtain quotes', 'Compare reviews', 'Instruct solicitor', 'Provide identification'],
+    questions: ['Fixed fee?', 'No-sale-no-fee?', 'Expected timeline?'],
+  },
+  {
+    title: 'Submit Offer',
+    status: 'Not Started',
+    tasks: ['Decide offer amount', 'Review comparable sales', 'Submit offer', 'Track negotiation history'],
+    questions: ['Am I overpaying?', 'What evidence supports my offer?'],
+  },
+  {
+    title: 'Offer Accepted',
+    status: 'Not Started',
+    tasks: ['Offer accepted', 'Memorandum of sale issued', 'Parties introduced'],
+    questions: ['Seller chain', 'Estate agent contacts', 'Expected timescales'],
+  },
+  {
+    title: 'Submit Full Mortgage Application',
+    status: 'Not Started',
+    tasks: ['Upload documents', 'Provide payslips', 'Provide bank statements', 'Provide identification', 'Submit application'],
+    questions: ['Application date', 'Lender', 'Broker', 'Expected decision date'],
+  },
+  {
+    title: 'Survey & Property Checks',
+    status: 'Not Started',
+    tasks: ['Book survey', 'Receive report', 'Review findings', 'Obtain contractor quotes if needed'],
+    questions: ['Any structural issues?', 'Any expensive repairs?', 'Should I renegotiate?'],
+  },
+  {
+    title: 'Conveyancing & Searches',
+    status: 'Not Started',
+    tasks: ['Local authority searches', 'Environmental searches', 'Water searches', 'Title review', 'Contract review'],
+    questions: ['Any restrictions?', 'Any planning issues?', 'Any legal concerns?'],
+  },
+  {
+    title: 'Exchange & Completion',
+    status: 'Not Started',
+    tasks: ['Exchange contracts', 'Transfer deposit', 'Arrange insurance', 'Arrange removals', 'Completion day'],
+    questions: ['Keys collected', 'Property purchased'],
+  },
+];
+
+const BUY_CONSIDERATIONS = [
+  { title: 'Financial', items: ['Mortgage affordability', 'Interest rate changes', 'Emergency fund', 'Future maintenance costs', 'Insurance costs'] },
+  { title: 'Lifestyle', items: ['Commute', 'Schools', 'Neighbourhood', 'Parking', 'Noise', 'Future family plans'] },
+  { title: 'Property Condition', items: ['Roof', 'Damp', 'Heating', 'Windows', 'Electrical systems', 'Plumbing'] },
+  { title: 'Legal', items: ['Leasehold terms', 'Restrictions', 'Boundary issues', 'Planning history', 'Rights of way'] },
+  { title: 'Future Value', items: ['Resale potential', 'Extension potential', 'Area development', 'Rental potential', 'Local demand'] },
+];
+
+const BUY_ASSISTANT_MODES = [
+  { key: 'offer', label: 'Offer', icon: 'pricetag-outline', placeholder: 'I like this property. Asking price is... I am thinking about offering...' },
+  { key: 'counter', label: 'Counter', icon: 'swap-horizontal-outline', placeholder: 'The agent replied that the seller wants at least...' },
+  { key: 'survey', label: 'Survey issue', icon: 'construct-outline', placeholder: 'The survey found damp / roof / electrical issues...' },
+  { key: 'agent', label: 'Agent reply', icon: 'chatbubble-ellipses-outline', placeholder: 'Paste or summarise what the estate agent said...' },
+  { key: 'decision', label: 'Decision', icon: 'git-compare-outline', placeholder: 'I am choosing between this property and another option...' },
+];
+
+const BUY_ASSISTANT_PLAYBOOK = {
+  offer: {
+    title: 'Opening offer strategy',
+    recommendation: 'Start with an evidence-led offer that leaves room to move. Keep your first message calm, specific, and tied to comparables, property condition, and your readiness to proceed.',
+    options: [
+      { label: 'Cautious', action: 'Open below your target and ask the agent what evidence would help the seller move.', reasoning: 'Useful when demand feels soft or the property has been sitting.' },
+      { label: 'Balanced', action: 'Offer near your evidence-backed fair value and hold back one planned increase.', reasoning: 'Keeps you credible while preserving negotiation room.' },
+      { label: 'Strong', action: 'Open close to your ceiling only if the property is rare and your finances are ready.', reasoning: 'Best when losing the property would be worse than paying a little more.' },
+    ],
+    risks: ['Do not reveal your maximum budget early.', 'Do not increase without asking what would secure acceptance.', 'Keep survey/legal findings as future negotiation points.'],
+    questions: ['How long has it been listed?', 'Have there been price reductions?', 'What comparable sales support your number?'],
+    draft: 'We like the property and are in a position to proceed. Based on our review of the market and the work still to confirm through survey/legal checks, we would like to offer [amount].',
+  },
+  counter: {
+    title: 'Counter-offer response',
+    recommendation: 'Treat the seller number as a signal, not a fact. Ask whether that figure would secure the property, then decide whether to hold, move slightly, or ask for evidence.',
+    options: [
+      { label: 'Hold', action: 'Keep your offer unchanged and ask the agent to keep you updated.', reasoning: 'Works if your offer is defensible and you are comfortable walking away.' },
+      { label: 'Small move', action: 'Increase modestly with a clear final-review tone.', reasoning: 'Shows goodwill without letting the seller control your ceiling.' },
+      { label: 'Conditional move', action: 'Increase only if the seller agrees to stop viewings or set a clear acceptance condition.', reasoning: 'Turns extra money into certainty rather than just another bid.' },
+    ],
+    risks: ['The agent may be testing your ceiling.', 'A large jump can reset the seller expectation.', 'A verbal “minimum” is not the same as acceptance.'],
+    questions: ['Would that figure take it off the market?', 'Are there other proceedable buyers?', 'What is driving the seller timeline?'],
+    draft: 'Thanks for the update. Before we revise our position, can you confirm whether [amount] would secure acceptance and remove the property from further viewings?',
+  },
+  survey: {
+    title: 'Survey issue strategy',
+    recommendation: 'Separate urgent defects from normal maintenance. Get quotes where possible, then decide whether the issue changes price, risk, or your willingness to proceed.',
+    options: [
+      { label: 'Clarify', action: 'Ask the surveyor what needs immediate action and what can wait.', reasoning: 'Avoid overreacting to broad survey language.' },
+      { label: 'Evidence', action: 'Get contractor quotes before renegotiating.', reasoning: 'A quantified repair cost gives your request weight.' },
+      { label: 'Renegotiate', action: 'Ask for a reduction or contribution tied to documented costs.', reasoning: 'Works best when the issue was not visible before offer.' },
+    ],
+    risks: ['Some issues are lender-sensitive.', 'Quotes may uncover wider problems.', 'The seller may resist if the defect was obvious at viewing.'],
+    questions: ['Is it structural, safety-related, or routine maintenance?', 'Will the lender care?', 'What would it cost to fix properly?'],
+    draft: 'Following the survey, we need to understand the likely cost and urgency of [issue]. We are obtaining quotes and may need to revisit the agreed price once the position is clearer.',
+  },
+  agent: {
+    title: 'Agent message analysis',
+    recommendation: 'Read the agent reply for leverage: urgency, competition, seller confidence, and whether they are inviting a move or closing the door.',
+    options: [
+      { label: 'Ask', action: 'Request specifics before changing your position.', reasoning: 'Prevents negotiating against vague pressure.' },
+      { label: 'Anchor', action: 'Restate your evidence and buying position.', reasoning: 'Keeps the conversation grounded in facts.' },
+      { label: 'Probe', action: 'Ask what terms matter besides price.', reasoning: 'Speed, chain position, or certainty can matter as much as pounds.' },
+    ],
+    risks: ['Agent wording may be tactical.', 'Competition can be real or overstated.', 'Speed pressure can push you past your plan.'],
+    questions: ['What exactly has changed?', 'Is price the only concern?', 'What would make our offer stronger?'],
+    draft: 'Thanks. Could you help us understand what matters most to the seller here: price, speed, certainty, or timing? We want to put forward the strongest sensible position.',
+  },
+  decision: {
+    title: 'Buyer decision soundboard',
+    recommendation: 'Compare the property against your actual buyer goals, not just the excitement of the moment. Use ranking, affordability, condition, and lifestyle tradeoffs together.',
+    options: [
+      { label: 'Proceed', action: 'Move forward if the property is strong on must-haves and risks are manageable.', reasoning: 'Best when compromises are understood and affordable.' },
+      { label: 'Pause', action: 'Gather one missing piece of evidence before committing.', reasoning: 'Useful when uncertainty is specific and answerable.' },
+      { label: 'Walk', action: 'Step back if cost, risk, or lifestyle compromise breaks your original criteria.', reasoning: 'A good property is not good if it breaks the plan.' },
+    ],
+    risks: ['Emotional momentum can override budget.', 'A high rank does not remove legal/survey risk.', 'A poor negotiation can damage an otherwise good purchase.'],
+    questions: ['What would make you regret buying it?', 'What would make you regret losing it?', 'Which facts are still missing?'],
+    draft: 'Current buyer view: this property is worth pursuing if the price stays within plan and the remaining checks do not reveal material issues.',
+  },
+};
 const PROPERTY_TYPE_OPTIONS = [
   { key: 'all', label: 'Show all' },
   { key: 'detached', label: 'Detached', terms: ['detached'] },
@@ -573,17 +716,24 @@ const getRankNumber = (listing, rankKey) => {
   return rank !== null && rank > 0 ? rank : Number.POSITIVE_INFINITY;
 };
 
-const getBuyerBudgetGroup = (listing, buyerPreference) => {
-  const maxBudget = getNumericValue(buyerPreference?.maxBudget, buyerPreference?.MaxBudget);
-  const price = getNumericValue(listing?.Price, listing?.price, listing?.listing?.Price, listing?.listing?.price);
+const getDeckShortlistCount = (deck) => {
+  const shortlistCount = getNumericValue(deck?.shortlistCount, deck?.ShortlistCount);
+  if (shortlistCount !== null) return shortlistCount;
+  return Array.isArray(deck?.shortlist) ? deck.shortlist.length : 0;
+};
 
-  if (!maxBudget || price === null) return 4;
-  if (price <= maxBudget) return 1;
+const getBackendRankGroupOrder = (listing) => {
+  const breakdown = parseJsonObject(listing?.scoreBreakdownJson || listing?.ScoreBreakdownJson);
+  const group = breakdown?.personalised?.rankGroup || breakdown?.rankGroup || breakdown?.final?.rankGroup;
+  const order = getNumericValue(group?.order);
+  if (order !== null) return order;
 
-  const overBudgetPercent = ((price - maxBudget) / maxBudget) * 100;
-  if (overBudgetPercent <= 10) return 2;
-  if (overBudgetPercent <= 20) return 3;
-  return 4;
+  const key = String(group?.key || group || '').toUpperCase();
+  if (key === 'A') return 1;
+  if (key === 'B') return 2;
+  if (key === 'C') return 3;
+  if (key === 'D') return 4;
+  return Number.POSITIVE_INFINITY;
 };
 
 export default function PropertyDeckScreen({ route }) {
@@ -597,6 +747,7 @@ export default function PropertyDeckScreen({ route }) {
   const isEnrichingDeckListingsRef = useRef(false);
   const lastRichFilterEnrichmentKeyRef = useRef(null);
   const shortlistRemovalTimersRef = useRef(new Map());
+  const loadedDeckContentIdRef = useRef(null);
   const [mode, setMode] = useState('list');
   const [decks, setDecks] = useState([]);
   const [selectedDeckId, setSelectedDeckId] = useState(null);
@@ -610,7 +761,11 @@ export default function PropertyDeckScreen({ route }) {
   const [deckFilters, setDeckFilters] = useState(createDefaultDeckFilters);
   const [shortlistSortMode, setShortlistSortMode] = useState('yourFit');
   const [pendingShortlistRemovals, setPendingShortlistRemovals] = useState({});
-  const [buyerPreference, setBuyerPreference] = useState(null);
+  const [buyerAssistantMode, setBuyerAssistantMode] = useState('offer');
+  const [buyerAssistantInput, setBuyerAssistantInput] = useState('');
+  const [buyerAssistantResult, setBuyerAssistantResult] = useState(null);
+  const [buyerAssistantLoading, setBuyerAssistantLoading] = useState(false);
+  const [buyerAssistantError, setBuyerAssistantError] = useState('');
 
   const deckLimit = getPropertyDeckLimit(currentTier);
   const selectedDeck = decks.find((deck) => String(deck.id) === String(selectedDeckId)) || null;
@@ -619,19 +774,38 @@ export default function PropertyDeckScreen({ route }) {
   const activeShortlistSortMode = shortlistSortMode === 'yourFit' && hasYourFitRanks ? 'yourFit' : 'overall';
   const sortedShortlist = useMemo(() => (
     [...selectedShortlist].sort((left, right) => {
-      if (activeShortlistSortMode === 'yourFit') {
-        const leftBudgetGroup = getBuyerBudgetGroup(left, buyerPreference);
-        const rightBudgetGroup = getBuyerBudgetGroup(right, buyerPreference);
-        if (leftBudgetGroup !== rightBudgetGroup) return leftBudgetGroup - rightBudgetGroup;
-      }
-
       const leftRank = getRankNumber(left, activeShortlistSortMode);
       const rightRank = getRankNumber(right, activeShortlistSortMode);
+
+      if (activeShortlistSortMode === 'yourFit') {
+        const leftGroup = getBackendRankGroupOrder(left);
+        const rightGroup = getBackendRankGroupOrder(right);
+        const hasMissingRank = !Number.isFinite(leftRank) || !Number.isFinite(rightRank);
+
+        if (hasMissingRank) {
+          if (leftGroup !== rightGroup) return leftGroup - rightGroup;
+
+          const scoreDiff = getUserMatchRating(right) - getUserMatchRating(left);
+          if (scoreDiff !== 0) return scoreDiff;
+        }
+      }
+
       if (leftRank !== rightRank) return leftRank - rightRank;
 
       return getUserMatchRating(right) - getUserMatchRating(left);
     })
-  ), [activeShortlistSortMode, buyerPreference, selectedShortlist]);
+  ), [activeShortlistSortMode, selectedShortlist]);
+  const pendingRemovalIds = Object.keys(pendingShortlistRemovals);
+  const visibleShortlist = useMemo(() => (
+    sortedShortlist.filter((listing) => {
+      const listingId = getListingId(listing);
+      const shortlistListingId = listing.shortListListingId || listing.ShortListListingId || listing.ShortListListingID || listing.shortlistListingId;
+      return !(
+        (listingId && pendingShortlistRemovals[listingId]) ||
+        (shortlistListingId && pendingShortlistRemovals[shortlistListingId])
+      );
+    })
+  ), [pendingShortlistRemovals, sortedShortlist]);
   const activeDecks = decks.filter((deck) => !isDeckDeleted(deck));
   const deletedDecks = decks.filter(isDeckDeleted);
   const filteredDeckListings = useMemo(
@@ -655,7 +829,15 @@ export default function PropertyDeckScreen({ route }) {
       });
     }
 
-    setDecks(nextDecks);
+    setDecks((currentDecks) => nextDecks.map((nextDeck) => {
+      const currentDeck = currentDecks.find((deck) => String(deck.id) === String(nextDeck.id));
+      if (!currentDeck) return nextDeck;
+
+      const currentShortlist = Array.isArray(currentDeck.shortlist) ? currentDeck.shortlist : [];
+      return currentShortlist.length
+        ? { ...nextDeck, shortlist: currentShortlist, shortlistCount: currentShortlist.length }
+        : { ...nextDeck, shortlist: currentDeck.shortlist || [], shortlistCount: getDeckShortlistCount(nextDeck) };
+    }));
 
     if (selectedDeckId && !nextDecks.some((deck) => deck.id === selectedDeckId)) {
       setSelectedDeckId(null);
@@ -671,9 +853,18 @@ export default function PropertyDeckScreen({ route }) {
     let nextDecks = [];
     let nextListings = [];
     let nextShortlist = [];
+    let deckSummary = null;
 
     try {
       nextDecks = await getPropertyDecks(userProfile);
+      deckSummary = nextDecks.find((deck) => String(deck.id) === String(deckId)) || null;
+      setDecks((currentDecks) => nextDecks.map((deck) => {
+        const currentDeck = currentDecks.find((item) => String(item.id) === String(deck.id));
+        const currentShortlist = Array.isArray(currentDeck?.shortlist) ? currentDeck.shortlist : [];
+        return currentShortlist.length
+          ? { ...deck, shortlist: currentShortlist, shortlistCount: currentShortlist.length }
+          : { ...deck, shortlist: currentDeck?.shortlist || [], shortlistCount: getDeckShortlistCount(deck) };
+      }));
     } catch (error) {
       console.log('[PROPERTY-DECK] load selected deck list failed:', {
         deckId,
@@ -684,9 +875,12 @@ export default function PropertyDeckScreen({ route }) {
     }
 
     try {
-      nextListings = await getMatchedDeckListings(deckId, userProfile);
+      [nextListings, nextShortlist] = await Promise.all([
+        getMatchedDeckListings(deckId, userProfile, deckSummary),
+        getShortlist(deckId, userProfile, deckSummary),
+      ]);
     } catch (error) {
-      console.log('[PROPERTY-DECK] load selected deck listings failed:', {
+      console.log('[PROPERTY-DECK] load selected deck content failed:', {
         deckId,
         status: error?.response?.status,
         data: error?.response?.data,
@@ -695,49 +889,18 @@ export default function PropertyDeckScreen({ route }) {
       Alert.alert('Could not load Property Deck listings', getDeckActionErrorMessage(error));
     }
 
-    try {
-      nextShortlist = await getShortlist(deckId, userProfile);
-    } catch (error) {
-      console.log('[PROPERTY-DECK] load selected shortlist failed:', {
-        deckId,
-        status: error?.response?.status,
-        data: error?.response?.data,
-        message: error?.message,
-      });
-    }
-
-    try {
-      const preference = await getBuyerPreferences(deckId);
-      setBuyerPreference(preference);
-    } catch (error) {
-      console.log('[PROPERTY-DECK] load buyer preference failed:', {
-        deckId,
-        status: error?.response?.status,
-        data: error?.response?.data,
-        message: error?.message,
-      });
-      setBuyerPreference(null);
-    }
-
-    if (nextShortlist.length) {
-      try {
-        nextShortlist = await recalculateShortlistRankings(deckId, 'Buyer', userProfile);
-      } catch (error) {
-        console.log('[PROPERTY-DECK] recalculate shortlist rankings failed:', {
-          deckId,
-          status: error?.response?.status,
-          data: error?.response?.data,
-          message: error?.message,
-        });
+    setDecks((currentDecks) => nextDecks.map((deck) => {
+      const currentDeck = currentDecks.find((item) => String(item.id) === String(deck.id));
+      if (String(deck.id) === String(deckId)) {
+        return { ...deck, shortlist: nextShortlist, shortlistCount: nextShortlist.length };
       }
-    }
-
-    setDecks(nextDecks.map((deck) => (
-      String(deck.id) === String(deckId)
-        ? { ...deck, shortlist: nextShortlist, shortlistCount: nextShortlist.length }
-        : deck
-    )));
+      const currentShortlist = Array.isArray(currentDeck?.shortlist) ? currentDeck.shortlist : [];
+      return currentShortlist.length
+        ? { ...deck, shortlist: currentShortlist, shortlistCount: currentShortlist.length }
+        : { ...deck, shortlist: currentDeck?.shortlist || [], shortlistCount: getDeckShortlistCount(deck) };
+    }));
     setDeckListings(nextListings);
+    loadedDeckContentIdRef.current = String(deckId);
     lastRichFilterEnrichmentKeyRef.current = null;
     setCurrentIndex(0);
     pan.setValue({ x: 0, y: 0 });
@@ -844,7 +1007,9 @@ export default function PropertyDeckScreen({ route }) {
       }
 
       if ((mode === 'detail' || mode === 'shortlist') && selectedDeckId) {
-        loadSelectedDeck(selectedDeckId);
+        if (loadedDeckContentIdRef.current !== String(selectedDeckId)) {
+          loadSelectedDeck(selectedDeckId);
+        }
       } else {
         loadDecks();
       }
@@ -869,7 +1034,9 @@ export default function PropertyDeckScreen({ route }) {
   const openDeck = async (deckId) => {
     setSelectedDeckId(deckId);
     setMode('detail');
-    await loadSelectedDeck(deckId);
+    if (loadedDeckContentIdRef.current !== String(deckId)) {
+      await loadSelectedDeck(deckId);
+    }
   };
 
   const openListingPreview = (listing) => {
@@ -1051,21 +1218,28 @@ export default function PropertyDeckScreen({ route }) {
 
     (async () => {
       try {
+        let rankedShortlist = null;
         if (direction === 'left') {
           await dismissDeckListing(deckId, listingId, userProfile);
         } else {
-          await saveToShortlist(deckId, listing, userProfile);
+          rankedShortlist = await saveToShortlist(deckId, listing, userProfile);
         }
 
-        const [nextDecks, nextShortlist] = await Promise.all([
-          getPropertyDecks(userProfile),
-          getShortlist(deckId, userProfile),
-        ]);
-        setDecks(nextDecks.map((deck) => (
-          deck.id === deckId
-            ? { ...deck, shortlist: nextShortlist, shortlistCount: nextShortlist.length }
-            : deck
-        )));
+        if (rankedShortlist) {
+          setDecks((currentDecks) => currentDecks.map((deck) => (
+            String(deck.id) === String(deckId)
+              ? { ...deck, shortlist: rankedShortlist, shortlistCount: rankedShortlist.length }
+              : deck
+          )));
+        } else {
+          const nextDecks = await getPropertyDecks(userProfile);
+          setDecks((currentDecks) => nextDecks.map((nextDeck) => {
+            const currentDeck = currentDecks.find((deck) => String(deck.id) === String(nextDeck.id));
+            return currentDeck?.shortlist
+              ? { ...nextDeck, shortlist: currentDeck.shortlist, shortlistCount: currentDeck.shortlist.length }
+              : nextDeck;
+          }));
+        }
       } catch (error) {
         console.log('[PROPERTY-DECK] swipe action failed:', {
           direction,
@@ -1130,15 +1304,27 @@ export default function PropertyDeckScreen({ route }) {
 
     const timer = setTimeout(async () => {
       shortlistRemovalTimersRef.current.delete(listingId);
-      setPendingShortlistRemovals((current) => {
-        const next = { ...current };
-        delete next[listingId];
-        return next;
-      });
 
       try {
         await removeFromShortlist(selectedDeckId, listingId, userProfile);
-        await loadSelectedDeck(selectedDeckId);
+        setDecks((currentDecks) => currentDecks.map((deck) => (
+          String(deck.id) === String(selectedDeckId)
+            ? {
+                ...deck,
+                shortlist: (deck.shortlist || []).filter((item) => {
+                  const itemListingId = getListingId(item);
+                  const itemShortlistId = item.shortListListingId || item.ShortListListingId || item.ShortListListingID || item.shortlistListingId;
+                  return String(itemListingId) !== String(listingId) && String(itemShortlistId) !== String(listingId);
+                }),
+                shortlistCount: Math.max(0, (deck.shortlistCount ?? deck.shortlist?.length ?? 1) - 1),
+              }
+            : deck
+        )));
+        setPendingShortlistRemovals((current) => {
+          const next = { ...current };
+          delete next[listingId];
+          return next;
+        });
       } catch (error) {
         console.log('[PROPERTY-DECK] remove shortlist item failed:', {
           listingId,
@@ -1146,9 +1332,14 @@ export default function PropertyDeckScreen({ route }) {
           data: error?.response?.data,
           message: error?.message,
         });
+        setPendingShortlistRemovals((current) => {
+          const next = { ...current };
+          delete next[listingId];
+          return next;
+        });
         Alert.alert('Could not remove from shortlist', getDeckActionErrorMessage(error));
       }
-    }, 15000);
+    }, 5000);
 
     shortlistRemovalTimersRef.current.set(listingId, timer);
   };
@@ -1172,6 +1363,7 @@ export default function PropertyDeckScreen({ route }) {
     navigation.navigate('DecisionBoards', {
       pendingListing: listing,
       pendingSource: {
+        shortListListingId: listing.shortListListingId || listing.ShortListListingId || listing.ShortListListingID || listing.shortlistListingId,
         shortListId: listing.shortListId || listing.ShortListID,
         sourceFlow: 'propertyDeck',
         suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
@@ -1187,6 +1379,15 @@ export default function PropertyDeckScreen({ route }) {
         suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
       },
     });
+  };
+
+  const handleFlowStepPress = (stepKey) => {
+    if (stepKey === 'decision') {
+      openDecisionBoardsForDeck();
+      return;
+    }
+
+    setMode(stepKey);
   };
 
   const confirmArchiveDeck = (deck) => {
@@ -1260,7 +1461,12 @@ export default function PropertyDeckScreen({ route }) {
           const isComplete = index < activeIndex;
 
           return (
-            <View key={step.key} style={styles.flowStepItem}>
+            <TouchableOpacity
+              key={step.key}
+              style={styles.flowStepItem}
+              onPress={() => handleFlowStepPress(step.key)}
+              activeOpacity={0.85}
+            >
               <View style={styles.flowStepTopRow}>
                 <View
                   style={[
@@ -1284,7 +1490,7 @@ export default function PropertyDeckScreen({ route }) {
               <Text style={[styles.flowStepLabel, isActive && styles.flowStepLabelActive]} numberOfLines={1}>
                 {step.label}
               </Text>
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>
@@ -1321,7 +1527,7 @@ export default function PropertyDeckScreen({ route }) {
           )}
 
           <Text style={styles.deckListMeta}>
-            {item.shortlist.length} shortlisted / created {formatDate(item.createdAt)}
+            {getDeckShortlistCount(item)} shortlisted / created {formatDate(item.createdAt)}
           </Text>
         </View>
 
@@ -1519,7 +1725,11 @@ export default function PropertyDeckScreen({ route }) {
   const renderShortlistItem = ({ item, index }) => {
     const imageUrl = normalizeImageUrls(item)[0];
     const listingId = getListingId(item);
-    const isPendingRemoval = Boolean(listingId && pendingShortlistRemovals[listingId]);
+    const shortlistDeleteId = item.shortListListingId || item.ShortListListingId || item.ShortListListingID || item.shortlistListingId || listingId;
+    const isPendingRemoval = Boolean(
+      (listingId && pendingShortlistRemovals[listingId]) ||
+      (shortlistDeleteId && pendingShortlistRemovals[shortlistDeleteId])
+    );
     const propertyRank = formatRank(item.propertyRank ?? item.PropertyRank);
     const yourFitRank = formatRank(item.yourFitRank ?? item.YourFitRank);
     const propertyRating = propertyRank || getListingRating(item);
@@ -1583,24 +1793,24 @@ export default function PropertyDeckScreen({ route }) {
           )}
         </View>
 
-        {isPendingRemoval ? (
-          <TouchableOpacity
-            style={styles.undoRemoveButton}
-            onPress={() => undoRemoveFromShortlist(listingId)}
-          >
-            <Ionicons name="arrow-undo-outline" size={17} color={APP_PURPLE} />
-            <Text style={styles.undoRemoveButtonText}>Undo</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.shortlistActionColumn}>
+        <View style={styles.shortlistActionColumn}>
+          {isPendingRemoval ? (
+            <TouchableOpacity
+              style={styles.undoRemoveButton}
+              onPress={() => undoRemoveFromShortlist(listingId)}
+            >
+              <Ionicons name="arrow-undo-outline" size={17} color={APP_PURPLE} />
+              <Text style={styles.undoRemoveButtonText}>Undo</Text>
+            </TouchableOpacity>
+          ) : (
             <TouchableOpacity
               style={styles.removeButton}
-              onPress={() => handleRemoveFromShortlist(listingId)}
+              onPress={() => handleRemoveFromShortlist(shortlistDeleteId)}
             >
               <Ionicons name="trash-outline" size={18} color="#EF4444" />
             </TouchableOpacity>
-          </View>
-        )}
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
@@ -1662,7 +1872,7 @@ export default function PropertyDeckScreen({ route }) {
         <View style={styles.detailHeaderText}>
           <Text style={styles.title} numberOfLines={1}>Shortlist</Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            Review {selectedDeck?.shortlist.length || 0} selected listings from {selectedDeck?.name || 'Property Deck'}.
+            Review {visibleShortlist.length} selected listings from {selectedDeck?.name || 'Property Deck'}.
           </Text>
         </View>
       </View>
@@ -1718,7 +1928,7 @@ export default function PropertyDeckScreen({ route }) {
       </View>
 
       <FlatList
-        data={sortedShortlist}
+        data={visibleShortlist}
         renderItem={renderShortlistItem}
         keyExtractor={(item, index) => getListingId(item) || `shortlist-${index}`}
         contentContainerStyle={styles.shortlistScreenList}
@@ -1732,6 +1942,314 @@ export default function PropertyDeckScreen({ route }) {
         showsVerticalScrollIndicator={false}
       />
 
+      {!!pendingRemovalIds.length && (
+        <View style={[styles.shortlistUndoBar, { bottom: Math.max(insets.bottom + 12, 20) }]}>
+          <View style={styles.shortlistUndoTextWrap}>
+            <Text style={styles.shortlistUndoTitle}>
+              {pendingRemovalIds.length === 1 ? 'Removed from shortlist' : `${pendingRemovalIds.length} properties removed`}
+            </Text>
+            <Text style={styles.shortlistUndoText}>Undo available for 5 seconds.</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.shortlistUndoButton}
+            onPress={() => undoRemoveFromShortlist(pendingRemovalIds[0])}
+          >
+            <Ionicons name="arrow-undo-outline" size={16} color={APP_PURPLE} />
+            <Text style={styles.shortlistUndoButtonText}>Undo</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+    </>
+  );
+
+  const completedBuySteps = BUY_CHECKLIST.filter((step) => step.status === 'Completed').length;
+  const activeBuyStep = BUY_CHECKLIST.find((step) => step.status !== 'Completed') || BUY_CHECKLIST[BUY_CHECKLIST.length - 1];
+  const buyProgress = Math.round((completedBuySteps / BUY_CHECKLIST.length) * 100);
+
+  const renderBuyChecklistItem = (step, index) => {
+    const statusStyle = step.status === 'Completed'
+      ? styles.buyStatusComplete
+      : step.status === 'In Progress'
+        ? styles.buyStatusInProgress
+        : styles.buyStatusNotStarted;
+
+    return (
+      <View key={step.title} style={styles.buyChecklistCard}>
+        <View style={styles.buyChecklistHeader}>
+          <View style={styles.buyStepNumber}>
+            <Text style={styles.buyStepNumberText}>{index + 1}</Text>
+          </View>
+          <View style={styles.buyChecklistTitleWrap}>
+            <Text style={styles.buyChecklistTitle}>{step.title}</Text>
+            <Text style={[styles.buyStatusText, statusStyle]}>{step.status}</Text>
+          </View>
+        </View>
+        <View style={styles.buyTaskList}>
+          {step.tasks.slice(0, 4).map((task) => (
+            <View key={task} style={styles.buyTaskRow}>
+              <Ionicons name="ellipse-outline" size={13} color="#94A3B8" />
+              <Text style={styles.buyTaskText}>{task}</Text>
+            </View>
+          ))}
+        </View>
+        <View style={styles.buyQuestionPanel}>
+          {step.questions.slice(0, 2).map((question) => (
+            <Text key={question} style={styles.buyQuestionText}>{question}</Text>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const generateBuyerAssistantStrategy = async () => {
+    if (buyerAssistantLoading) return;
+
+    setBuyerAssistantLoading(true);
+    setBuyerAssistantError('');
+    try {
+      const assistant = await askBuyerWorkspaceAssistant({
+        mode: buyerAssistantMode,
+        scenario: buyerAssistantInput,
+        propertyDeckId: selectedDeckId,
+      });
+      setBuyerAssistantResult(assistant);
+    } catch (error) {
+      setBuyerAssistantError(error?.response?.data?.error || error?.message || 'Could not reach the AI assistant. Showing the local playbook.');
+      setBuyerAssistantResult(null);
+    } finally {
+      setBuyerAssistantLoading(false);
+    }
+  };
+
+  const renderBuyerAssistantWorkspace = () => {
+    const modeConfig = BUY_ASSISTANT_MODES.find((item) => item.key === buyerAssistantMode) || BUY_ASSISTANT_MODES[0];
+    const playbook = buyerAssistantResult || BUY_ASSISTANT_PLAYBOOK[buyerAssistantMode] || BUY_ASSISTANT_PLAYBOOK.offer;
+    const focusListing = visibleShortlist[0] || selectedShortlist[0] || null;
+    const listingTitle = focusListing?.Title || focusListing?.Address || focusListing?.title || 'top shortlisted property';
+    const listingPrice = formatPrice(focusListing?.Price || focusListing?.price);
+    const yourFitRank = getRankNumber(focusListing, 'yourFit');
+    const overallRank = getRankNumber(focusListing, 'overall');
+    const hasRank = Number.isFinite(yourFitRank) || Number.isFinite(overallRank);
+    const scenarioText = buyerAssistantInput.trim();
+
+    return (
+      <View style={styles.buyAssistantSection}>
+        <View style={styles.buyAssistantHeader}>
+          <View style={styles.buyAssistantIcon}>
+            <Ionicons name="sparkles" size={20} color="#FFFFFF" />
+          </View>
+          <View style={styles.buyAssistantHeaderText}>
+            <Text style={styles.buySectionEyebrow}>AI buyer workspace</Text>
+            <Text style={styles.buySectionTitle}>Offer & negotiation assistant</Text>
+            <Text style={styles.buyAssistantCopy}>
+              Shape buyer-side strategy for offers, counters, agent replies, survey issues and final decisions.
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.buyModeGrid}>
+          {BUY_ASSISTANT_MODES.map((item) => {
+            const isSelected = item.key === buyerAssistantMode;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                style={[styles.buyModeChip, isSelected && styles.buyModeChipActive]}
+                onPress={() => setBuyerAssistantMode(item.key)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name={item.icon} size={14} color={isSelected ? '#FFFFFF' : APP_PURPLE} />
+                <Text style={[styles.buyModeText, isSelected && styles.buyModeTextActive]}>{item.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={styles.buyScenarioCard}>
+          <Text style={styles.buyScenarioLabel}>What happened?</Text>
+          <TextInput
+            value={buyerAssistantInput}
+            onChangeText={setBuyerAssistantInput}
+            placeholder={modeConfig.placeholder}
+            placeholderTextColor="#94A3B8"
+            multiline
+            style={styles.buyScenarioInput}
+          />
+          <TouchableOpacity
+            style={[styles.buyGenerateButton, buyerAssistantLoading && styles.buyGenerateButtonDisabled]}
+            onPress={generateBuyerAssistantStrategy}
+            disabled={buyerAssistantLoading}
+            activeOpacity={0.86}
+          >
+            {buyerAssistantLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="sparkles" size={16} color="#FFFFFF" />
+            )}
+            <Text style={styles.buyGenerateButtonText}>
+              {buyerAssistantLoading ? 'Thinking' : 'Generate strategy'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {!!buyerAssistantError && (
+          <View style={styles.buyAssistantError}>
+            <Ionicons name="information-circle-outline" size={16} color="#B45309" />
+            <Text style={styles.buyAssistantErrorText}>{buyerAssistantError}</Text>
+          </View>
+        )}
+
+        <View style={styles.buyContextStrip}>
+          <Text style={styles.buyContextText} numberOfLines={2}>
+            Context: {listingTitle}{listingPrice ? ` / ${listingPrice}` : ''}{hasRank ? ` / ${Number.isFinite(yourFitRank) ? `Your fit #${yourFitRank}` : `Deck #${overallRank}`}` : ''}
+          </Text>
+        </View>
+
+        <View style={styles.buyStrategyCard}>
+          <Text style={styles.buyStrategyLabel}>{playbook.title}</Text>
+          <Text style={styles.buyStrategyRecommendation}>
+            {scenarioText ? playbook.recommendation : `${playbook.recommendation} Add the latest agent message, offer idea or survey concern above to make this workspace specific.`}
+          </Text>
+        </View>
+
+        <View style={styles.buyOptionGrid}>
+          {playbook.options.map((option) => (
+            <View key={option.label} style={styles.buyOptionCard}>
+              <Text style={styles.buyOptionLabel}>{option.label}</Text>
+              <Text style={styles.buyOptionAction}>{option.action}</Text>
+              <Text style={styles.buyOptionReasoning}>{option.reasoning}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.buyDraftCard}>
+          <View style={styles.buyDraftHeader}>
+            <Ionicons name="mail-outline" size={17} color={APP_PURPLE} />
+            <Text style={styles.buyDraftTitle}>Agent message draft</Text>
+          </View>
+          <Text style={styles.buyDraftText}>{playbook.draft}</Text>
+        </View>
+
+        <View style={styles.buyInsightGrid}>
+          <View style={styles.buyInsightCard}>
+            <Text style={styles.buyInsightTitle}>Risks</Text>
+            {playbook.risks.map((risk) => (
+              <Text key={risk} style={styles.buyInsightText}>{risk}</Text>
+            ))}
+          </View>
+          <View style={styles.buyInsightCard}>
+            <Text style={styles.buyInsightTitle}>Next questions</Text>
+            {playbook.questions.map((question) => (
+              <Text key={question} style={styles.buyInsightText}>{question}</Text>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderBuyScreen = () => (
+    <>
+      <View style={styles.detailHeader}>
+        <TouchableOpacity style={styles.backButton} onPress={() => setMode('shortlist')}>
+          <Ionicons name="arrow-back" size={22} color="#111827" />
+        </TouchableOpacity>
+        <View style={styles.detailHeaderText}>
+          <Text style={styles.title} numberOfLines={1}>Buy</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            Move from shortlisted property to purchased property with a guided plan.
+          </Text>
+        </View>
+      </View>
+
+      {renderFlowSteps()}
+
+      <ScrollView contentContainerStyle={styles.buyScrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.buyHero}>
+          <View style={styles.buyHeroIcon}>
+            <Ionicons name="home" size={24} color="#FFFFFF" />
+          </View>
+          <View style={styles.buyHeroBody}>
+            <Text style={styles.buyHeroTitle}>Buying guide</Text>
+            <Text style={styles.buyHeroCopy}>
+              Track the next actions, risks, documents, and evidence already gathered during Decision.
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.buyProgressCard}>
+          <View style={styles.buyProgressHeader}>
+            <View>
+              <Text style={styles.buySectionEyebrow}>Progress tracker</Text>
+              <Text style={styles.buySectionTitle}>Next: {activeBuyStep.title}</Text>
+            </View>
+            <Text style={styles.buyProgressValue}>{buyProgress}%</Text>
+          </View>
+          <View style={styles.buyProgressTrack}>
+            <View style={[styles.buyProgressFill, { width: `${buyProgress}%` }]} />
+          </View>
+          <Text style={styles.buyProgressCopy}>
+            {completedBuySteps} of {BUY_CHECKLIST.length} stages complete. Keep the buyer focused on the next practical action.
+          </Text>
+        </View>
+
+        <View style={styles.buySection}>
+          <Text style={styles.buySectionEyebrow}>Interactive checklist</Text>
+          <Text style={styles.buySectionTitle}>10-step buying journey</Text>
+          {BUY_CHECKLIST.map(renderBuyChecklistItem)}
+        </View>
+
+        {renderBuyerAssistantWorkspace()}
+
+        <View style={styles.buySection}>
+          <Text style={styles.buySectionEyebrow}>Key considerations</Text>
+          <Text style={styles.buySectionTitle}>What to keep checking</Text>
+          <View style={styles.buyConsiderationGrid}>
+            {BUY_CONSIDERATIONS.map((group) => (
+              <View key={group.title} style={styles.buyConsiderationCard}>
+                <Text style={styles.buyConsiderationTitle}>{group.title}</Text>
+                {group.items.slice(0, 5).map((item) => (
+                  <Text key={item} style={styles.buyConsiderationItem}>{item}</Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.buySection}>
+          <Text style={styles.buySectionEyebrow}>Decision Board integration</Text>
+          <Text style={styles.buySectionTitle}>Evidence to carry forward</Text>
+          <View style={styles.buyEvidenceGrid}>
+            {['Photos', 'Videos', 'Voice notes', 'Viewing notes', 'Agent notes', 'Broker notes', 'Timeline events', 'Property pros', 'Property cons'].map((item) => (
+              <View key={item} style={styles.buyEvidencePill}>
+                <Ionicons name="checkmark-circle-outline" size={14} color="#22C55E" />
+                <Text style={styles.buyEvidenceText}>{item}</Text>
+              </View>
+            ))}
+          </View>
+          <TouchableOpacity style={styles.buyDecisionButton} onPress={openDecisionBoardsForDeck}>
+            <Ionicons name="git-branch-outline" size={17} color="#FFFFFF" />
+            <Text style={styles.buyDecisionButtonText}>Open Decision Board</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.buySection}>
+          <Text style={styles.buySectionEyebrow}>Documents, notes & timeline</Text>
+          <View style={styles.buyToolRow}>
+            {[
+              ['folder-open-outline', 'Document storage', 'Mortgage, ID, solicitor and survey files'],
+              ['document-text-outline', 'Notes review', 'Questions, observations and evidence'],
+              ['calendar-outline', 'Timeline tracking', 'Offer, mortgage, searches and completion'],
+            ].map(([icon, title, copy]) => (
+              <View key={title} style={styles.buyToolCard}>
+                <Ionicons name={icon} size={20} color={APP_PURPLE} />
+                <Text style={styles.buyToolTitle}>{title}</Text>
+                <Text style={styles.buyToolCopy}>{copy}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </ScrollView>
     </>
   );
 
@@ -1919,6 +2437,8 @@ export default function PropertyDeckScreen({ route }) {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {mode === 'shortlist'
         ? renderShortlistScreen()
+        : mode === 'buy'
+          ? renderBuyScreen()
         : mode === 'detail'
           ? renderDetailScreen()
           : renderListScreen()}
@@ -2289,6 +2809,545 @@ const styles = StyleSheet.create({
   shortlistSortOptionTextDisabled: {
     color: '#94A3B8',
   },
+  shortlistUndoBar: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderRadius: 10,
+    borderWidth: 1,
+    elevation: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    left: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    position: 'absolute',
+    right: 16,
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    zIndex: 20,
+  },
+  shortlistUndoTextWrap: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  shortlistUndoTitle: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  shortlistUndoText: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  shortlistUndoButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#C7D2FE',
+    borderWidth: 1,
+    borderRadius: 8,
+    flexDirection: 'row',
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  shortlistUndoButtonText: {
+    color: APP_PURPLE,
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 5,
+  },
+  buyScrollContent: {
+    padding: 16,
+    paddingBottom: 36,
+  },
+  buyHero: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginBottom: 12,
+    padding: 14,
+  },
+  buyHeroIcon: {
+    alignItems: 'center',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 8,
+    height: 46,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 46,
+  },
+  buyHeroBody: {
+    flex: 1,
+  },
+  buyHeroTitle: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  buyHeroCopy: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  buyProgressCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 14,
+  },
+  buyProgressHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  buyProgressValue: {
+    color: APP_PURPLE,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  buyProgressTrack: {
+    backgroundColor: '#E5E7EB',
+    borderRadius: 999,
+    height: 8,
+    marginTop: 12,
+    overflow: 'hidden',
+  },
+  buyProgressFill: {
+    backgroundColor: APP_PURPLE,
+    borderRadius: 999,
+    height: '100%',
+  },
+  buyProgressCopy: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 10,
+  },
+  buySection: {
+    marginTop: 14,
+  },
+  buySectionEyebrow: {
+    color: APP_PURPLE,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  buySectionTitle: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 3,
+    marginBottom: 10,
+  },
+  buyChecklistCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 12,
+  },
+  buyChecklistHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  buyStepNumber: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    height: 34,
+    justifyContent: 'center',
+    marginRight: 10,
+    width: 34,
+  },
+  buyStepNumberText: {
+    color: APP_PURPLE,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  buyChecklistTitleWrap: {
+    flex: 1,
+  },
+  buyChecklistTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  buyStatusText: {
+    alignSelf: 'flex-start',
+    borderRadius: 7,
+    fontSize: 10,
+    fontWeight: '900',
+    marginTop: 5,
+    overflow: 'hidden',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  buyStatusComplete: {
+    backgroundColor: '#DCFCE7',
+    color: '#15803D',
+  },
+  buyStatusInProgress: {
+    backgroundColor: '#EEF2FF',
+    color: APP_PURPLE,
+  },
+  buyStatusNotStarted: {
+    backgroundColor: '#F1F5F9',
+    color: '#64748B',
+  },
+  buyTaskList: {
+    gap: 6,
+    marginTop: 10,
+  },
+  buyTaskRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  buyTaskText: {
+    color: '#475569',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 7,
+  },
+  buyQuestionPanel: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    marginTop: 10,
+    padding: 10,
+  },
+  buyQuestionText: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 17,
+    marginBottom: 4,
+  },
+  buyAssistantSection: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 12,
+  },
+  buyAssistantHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  buyAssistantIcon: {
+    alignItems: 'center',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 8,
+    height: 40,
+    justifyContent: 'center',
+    marginRight: 10,
+    width: 40,
+  },
+  buyAssistantHeaderText: {
+    flex: 1,
+  },
+  buyAssistantCopy: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: -4,
+  },
+  buyModeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  buyModeChip: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  buyModeChipActive: {
+    backgroundColor: APP_PURPLE,
+    borderColor: APP_PURPLE,
+  },
+  buyModeText: {
+    color: APP_PURPLE,
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 6,
+  },
+  buyModeTextActive: {
+    color: '#FFFFFF',
+  },
+  buyScenarioCard: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 10,
+  },
+  buyScenarioLabel: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 7,
+  },
+  buyScenarioInput: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    minHeight: 76,
+    padding: 0,
+    textAlignVertical: 'top',
+  },
+  buyGenerateButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 8,
+    flexDirection: 'row',
+    marginTop: 10,
+    minHeight: 38,
+    paddingHorizontal: 12,
+  },
+  buyGenerateButtonDisabled: {
+    opacity: 0.72,
+  },
+  buyGenerateButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 7,
+  },
+  buyAssistantError: {
+    alignItems: 'flex-start',
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FDE68A',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: 10,
+    padding: 10,
+  },
+  buyAssistantErrorText: {
+    color: '#92400E',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginLeft: 7,
+  },
+  buyContextStrip: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  buyContextText: {
+    color: APP_PURPLE,
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 17,
+  },
+  buyStrategyCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    marginTop: 10,
+    padding: 10,
+  },
+  buyStrategyLabel: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  buyStrategyRecommendation: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  buyOptionGrid: {
+    gap: 8,
+    marginTop: 10,
+  },
+  buyOptionCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+  },
+  buyOptionLabel: {
+    color: APP_PURPLE,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  buyOptionAction: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  buyOptionReasoning: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  buyDraftCard: {
+    backgroundColor: '#FEFCE8',
+    borderColor: '#FDE68A',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 10,
+    padding: 10,
+  },
+  buyDraftHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  buyDraftTitle: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 6,
+  },
+  buyDraftText: {
+    color: '#3F3F46',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  buyInsightGrid: {
+    gap: 8,
+    marginTop: 10,
+  },
+  buyInsightCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+  },
+  buyInsightTitle: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 5,
+  },
+  buyInsightText: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  buyConsiderationGrid: {
+    gap: 10,
+  },
+  buyConsiderationCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+  },
+  buyConsiderationTitle: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  buyConsiderationItem: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  buyEvidenceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  buyEvidencePill: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  buyEvidenceText: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '800',
+    marginLeft: 6,
+  },
+  buyDecisionButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: APP_PURPLE,
+    borderRadius: 8,
+    flexDirection: 'row',
+    marginTop: 12,
+    minHeight: 40,
+    paddingHorizontal: 13,
+  },
+  buyDecisionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+    marginLeft: 7,
+  },
+  buyToolRow: {
+    gap: 10,
+  },
+  buyToolCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+  },
+  buyToolTitle: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  buyToolCopy: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 4,
+  },
   columnsContainer: {
     flex: 1,
     flexDirection: 'row',
@@ -2410,6 +3469,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     flexDirection: 'row',
     marginBottom: 10,
+    minHeight: 112,
     overflow: 'hidden',
   },
   shortlistItemPendingRemoval: {
@@ -2510,11 +3570,10 @@ const styles = StyleSheet.create({
   undoRemoveButton: {
     alignItems: 'center',
     backgroundColor: '#EEF2FF',
-    borderLeftColor: '#C7D2FE',
-    borderLeftWidth: 1,
-    height: '100%',
+    borderRadius: 8,
+    height: 54,
     justifyContent: 'center',
-    width: 62,
+    width: 58,
   },
   undoRemoveButtonText: {
     color: APP_PURPLE,
@@ -2526,8 +3585,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderLeftColor: '#E5E7EB',
     borderLeftWidth: 1,
+    alignSelf: 'stretch',
     justifyContent: 'center',
     paddingHorizontal: 4,
+    width: 70,
   },
   decisionButton: {
     alignItems: 'center',

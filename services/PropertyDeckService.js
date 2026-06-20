@@ -743,11 +743,11 @@ const getLocalMatchedDeckListings = async (deckId, userProfile) => {
   return listings;
 };
 
-export const getMatchedDeckListings = async (deckId, userProfile) => withApiFallback(
+export const getMatchedDeckListings = async (deckId, userProfile, deckOverride = null) => withApiFallback(
   async () => {
     requireBackendId(deckId, 'deckId');
     const [deck, response] = await Promise.all([
-      getPropertyDeck(deckId, userProfile),
+      deckOverride || getPropertyDeck(deckId, userProfile),
       api.get(`/api/property-decks/${deckId}/listings`, {
         params: { status: 'matched' },
         timeout: 45000,
@@ -832,14 +832,14 @@ export const saveToShortlist = async (deckId, listing, userProfile) => withApiFa
   async () => {
     requireBackendId(deckId, 'deckId');
     const listingId = getListingId(listing);
-    const listingWithDistance = withSearchDistance(listing, (await getPropertyDeck(deckId, userProfile))?.filterJson);
+    const deck = await getPropertyDeck(deckId, userProfile);
+    const listingWithDistance = withSearchDistance(listing, deck?.filterJson);
     const { data } = await api.post(`/api/property-decks/${deckId}/shortlist`, {
       listingId,
       sourcePropertyDeckListingId: listing.propertyDeckListingId || null,
       distanceMiles: listingWithDistance.distanceMiles,
       searchDistanceMiles: listingWithDistance.SearchDistanceMiles,
     });
-    const deck = await getPropertyDeck(deckId, userProfile);
     return getItems(data, 'shortlist')
       .map((item) => normalizeListing(item))
       .map((item) => withDeckSearchDistance(item, deck));
@@ -966,11 +966,11 @@ export const removeFromShortlist = async (deckId, listingId, userProfile) => wit
   'remove shortlist listing'
 );
 
-export const getShortlist = async (deckId, userProfile) => withApiFallback(
+export const getShortlist = async (deckId, userProfile, deckOverride = null) => withApiFallback(
   async () => {
     requireBackendId(deckId, 'deckId');
     const [deck, response] = await Promise.all([
-      getPropertyDeck(deckId, userProfile),
+      deckOverride || getPropertyDeck(deckId, userProfile),
       api.get(`/api/property-decks/${deckId}/shortlist`),
     ]);
 
