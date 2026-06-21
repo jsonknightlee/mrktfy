@@ -6,6 +6,7 @@ import {
   Animated,
   FlatList,
   Image,
+  Linking,
   Modal,
   PanResponder,
   ScrollView,
@@ -20,6 +21,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { askBuyerWorkspaceAssistant } from '../services/BuyerWorkspaceService';
+import { getDecisionBoard, getDecisionBoardMediaOpenUrl } from '../services/DecisionBoardService';
 import { getListingById } from '../services/listingApi';
 import {
   archivePropertyDeck,
@@ -188,6 +190,36 @@ const BUY_ASSISTANT_PLAYBOOK = {
     questions: ['What would make you regret buying it?', 'What would make you regret losing it?', 'Which facts are still missing?'],
     draft: 'Current buyer view: this property is worth pursuing if the price stays within plan and the remaining checks do not reveal material issues.',
   },
+};
+
+const getDecisionListingMediaType = (item) => {
+  const value = String(item?.mediaType || item?.MediaType || 'Document').toLowerCase();
+  if (value === 'photo' || value === 'image') return 'Photo';
+  if (value === 'video') return 'Video';
+  if (value === 'audio') return 'Audio';
+  return 'Document';
+};
+const getDecisionListingNoteText = (item) => item?.noteText || item?.NoteText || item?.notes || item?.Notes || '';
+const getDecisionListingTimelineTitle = (item) => item?.stageName || item?.StageName || item?.status || item?.Status || 'Timeline event';
+const getDecisionListingTimelineNotes = (item) => item?.notes || item?.Notes || '';
+const getDecisionListingDate = (item) => item?.eventDate || item?.EventDate || item?.createdAt || item?.CreatedAt || item?.updatedAt || item?.UpdatedAt;
+const getDecisionListingTaskTitle = (item) => item?.taskName || item?.TaskName || 'Task';
+const getDecisionListingTaskStatus = (item) => item?.status || item?.Status || 'pending';
+const getParticipantName = (item, type) => {
+  const nested = type === 'broker' ? item?.broker || item?.Broker : item?.agent || item?.Agent;
+  return (
+    nested?.brokerName ||
+    nested?.BrokerName ||
+    nested?.agentName ||
+    nested?.AgentName ||
+    item?.brokerName ||
+    item?.BrokerName ||
+    item?.agentName ||
+    item?.AgentName ||
+    item?.companyName ||
+    item?.CompanyName ||
+    'Linked contact'
+  );
 };
 const PROPERTY_TYPE_OPTIONS = [
   { key: 'all', label: 'Show all' },
@@ -2005,6 +2037,37 @@ export default function PropertyDeckScreen({ route }) {
 
   useEffect(() => {
     let isCancelled = false;
+    const decisionBoardId = buyerContextBoard?.id;
+    const decisionBoardListingId = buyerContextDecisionListing?.id;
+
+    const refreshBuyerDecisionContext = async () => {
+      if (!decisionBoardId || !decisionBoardListingId) return;
+
+      try {
+        const board = await getDecisionBoard(decisionBoardId);
+        const listings = board?.listings || board?.Listings || [];
+        const refreshedListing = listings.find((item) => String(item.id || item.ID) === String(decisionBoardListingId));
+
+        if (!isCancelled && refreshedListing) {
+          setBuyerWorkspaceContext((current) => ({
+            ...current,
+            decisionBoard: board,
+            decisionBoardListing: refreshedListing,
+            listing: refreshedListing.listing || refreshedListing.listingSummary || current?.listing,
+          }));
+        }
+      } catch {}
+    };
+
+    refreshBuyerDecisionContext();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [buyerContextBoard?.id, buyerContextDecisionListing?.id]);
+
+  useEffect(() => {
+    let isCancelled = false;
 
     const loadBuyChecklistProgress = async () => {
       try {
@@ -2041,6 +2104,27 @@ export default function PropertyDeckScreen({ route }) {
   const activeBuyStep = BUY_CHECKLIST.find((step, stepIndex) => (
     !step.tasks.every((_, taskIndex) => buyChecklistProgress[getBuyTaskKey(stepIndex, taskIndex)])
   )) || BUY_CHECKLIST[BUY_CHECKLIST.length - 1];
+  const buyerDecisionMedia = buyerContextDecisionListing?.media || buyerContextDecisionListing?.Media || [];
+  const buyerDecisionNotes = buyerContextDecisionListing?.listingNotes || buyerContextDecisionListing?.ListingNotes || [];
+  const buyerDecisionTimeline = buyerContextDecisionListing?.timeline || buyerContextDecisionListing?.Timeline || [];
+  const buyerDecisionTasks = buyerContextDecisionListing?.tasks || buyerContextDecisionListing?.Tasks || [];
+  const buyerDecisionAgents = buyerContextDecisionListing?.agents || buyerContextDecisionListing?.listingAgents || buyerContextDecisionListing?.ListingAgents || [];
+  const buyerDecisionBrokers = buyerContextDecisionListing?.brokers || buyerContextDecisionListing?.listingBrokers || buyerContextDecisionListing?.ListingBrokers || [];
+  const buyerDecisionPros = buyerContextDecisionListing?.pros || buyerContextDecisionListing?.Pros || buyerFocusListing?.pros || buyerFocusListing?.Pros || [];
+  const buyerDecisionCons = buyerContextDecisionListing?.cons || buyerContextDecisionListing?.Cons || buyerFocusListing?.cons || buyerFocusListing?.Cons || [];
+  const buyerEvidenceItems = [
+    ['Photos', buyerDecisionMedia.filter((item) => getDecisionListingMediaType(item) === 'Photo').length],
+    ['Videos', buyerDecisionMedia.filter((item) => getDecisionListingMediaType(item) === 'Video').length],
+    ['Voice notes', buyerDecisionMedia.filter((item) => getDecisionListingMediaType(item) === 'Audio').length],
+    ['Documents', buyerDecisionMedia.filter((item) => getDecisionListingMediaType(item) === 'Document').length],
+    ['Viewing notes', buyerDecisionNotes.length],
+    ['Agent notes', buyerDecisionAgents.length],
+    ['Broker notes', buyerDecisionBrokers.length],
+    ['Timeline events', buyerDecisionTimeline.length],
+    ['Open tasks', buyerDecisionTasks.filter((item) => String(getDecisionListingTaskStatus(item)).toLowerCase() !== 'completed').length],
+    ['Property pros', Array.isArray(buyerDecisionPros) ? buyerDecisionPros.length : 0],
+    ['Property cons', Array.isArray(buyerDecisionCons) ? buyerDecisionCons.length : 0],
+  ];
 
   const toggleBuyTask = (stepIndex, taskIndex) => {
     const taskKey = getBuyTaskKey(stepIndex, taskIndex);
@@ -2049,6 +2133,21 @@ export default function PropertyDeckScreen({ route }) {
       [taskKey]: !buyChecklistProgress[taskKey],
     };
     persistBuyChecklistProgress(nextProgress);
+  };
+
+  const openBuyerDecisionMedia = async (item) => {
+    const mediaId = item?.id || item?.ID;
+    const fileUrl = item?.fileUrl || item?.FileUrl;
+    if (!fileUrl) return;
+
+    try {
+      const openUrl = mediaId && buyerContextDecisionListing?.id
+        ? await getDecisionBoardMediaOpenUrl(buyerContextDecisionListing.id, mediaId)
+        : fileUrl;
+      await Linking.openURL(openUrl || fileUrl);
+    } catch {
+      Alert.alert('Cannot open file', 'This attachment could not be opened from the Buyer Workspace.');
+    }
   };
 
   const renderBuyChecklistItem = (step, index) => {
@@ -2101,6 +2200,82 @@ export default function PropertyDeckScreen({ route }) {
           {step.questions.slice(0, 2).map((question) => (
             <Text key={question} style={styles.buyQuestionText}>{question}</Text>
           ))}
+        </View>
+      </View>
+    );
+  };
+
+  const renderBuyEmptyState = (message) => (
+    <Text style={styles.buyEmptyText}>{message}</Text>
+  );
+
+  const renderBuyerMediaRow = (item) => {
+    const mediaType = getDecisionListingMediaType(item);
+    const caption = item?.caption || item?.Caption || item?.originalFileName || item?.OriginalFileName || mediaType;
+    const icon = mediaType === 'Photo'
+      ? 'image-outline'
+      : mediaType === 'Video'
+        ? 'videocam-outline'
+        : mediaType === 'Audio'
+          ? 'mic-outline'
+          : 'document-text-outline';
+
+    return (
+      <TouchableOpacity key={item.id || item.ID || caption} style={styles.buyDataRow} onPress={() => openBuyerDecisionMedia(item)} activeOpacity={0.84}>
+        <View style={styles.buyDataIcon}>
+          <Ionicons name={icon} size={17} color={APP_PURPLE} />
+        </View>
+        <View style={styles.buyDataBody}>
+          <Text style={styles.buyDataTitle} numberOfLines={1}>{caption}</Text>
+          <Text style={styles.buyDataMeta}>{mediaType}</Text>
+        </View>
+        <Ionicons name="open-outline" size={16} color="#94A3B8" />
+      </TouchableOpacity>
+    );
+  };
+
+  const renderBuyerNoteRow = (item, index) => {
+    const text = getDecisionListingNoteText(item);
+    if (!text) return null;
+
+    return (
+      <View key={item.id || item.ID || `note-${index}`} style={styles.buyDataRow}>
+        <View style={styles.buyDataIcon}>
+          <Ionicons name="document-text-outline" size={17} color={APP_PURPLE} />
+        </View>
+        <View style={styles.buyDataBody}>
+          <Text style={styles.buyDataTitle} numberOfLines={2}>{text}</Text>
+          <Text style={styles.buyDataMeta}>{formatDate(getDecisionListingDate(item))}</Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderBuyerTimelineRow = (item, index) => (
+    <View key={item.id || item.ID || `timeline-${index}`} style={styles.buyDataRow}>
+      <View style={styles.buyDataIcon}>
+        <Ionicons name="calendar-outline" size={17} color={APP_PURPLE} />
+      </View>
+      <View style={styles.buyDataBody}>
+        <Text style={styles.buyDataTitle} numberOfLines={1}>{getDecisionListingTimelineTitle(item)}</Text>
+        {!!getDecisionListingTimelineNotes(item) && (
+          <Text style={styles.buyDataCopy} numberOfLines={2}>{getDecisionListingTimelineNotes(item)}</Text>
+        )}
+        <Text style={styles.buyDataMeta}>{formatDate(getDecisionListingDate(item))}</Text>
+      </View>
+    </View>
+  );
+
+  const renderBuyerTaskRow = (item, index) => {
+    const isComplete = String(getDecisionListingTaskStatus(item)).toLowerCase() === 'completed';
+    return (
+      <View key={item.id || item.ID || `task-${index}`} style={styles.buyDataRow}>
+        <View style={styles.buyDataIcon}>
+          <Ionicons name={isComplete ? 'checkmark-circle-outline' : 'ellipse-outline'} size={17} color={isComplete ? '#22C55E' : APP_PURPLE} />
+        </View>
+        <View style={styles.buyDataBody}>
+          <Text style={styles.buyDataTitle} numberOfLines={1}>{getDecisionListingTaskTitle(item)}</Text>
+          <Text style={styles.buyDataMeta}>{getDecisionListingTaskStatus(item)}</Text>
         </View>
       </View>
     );
@@ -2377,10 +2552,11 @@ export default function PropertyDeckScreen({ route }) {
           <Text style={styles.buySectionEyebrow}>Decision Board integration</Text>
           <Text style={styles.buySectionTitle}>Evidence to carry forward</Text>
           <View style={styles.buyEvidenceGrid}>
-            {['Photos', 'Videos', 'Voice notes', 'Viewing notes', 'Agent notes', 'Broker notes', 'Timeline events', 'Property pros', 'Property cons'].map((item) => (
-              <View key={item} style={styles.buyEvidencePill}>
-                <Ionicons name="checkmark-circle-outline" size={14} color="#22C55E" />
+            {buyerEvidenceItems.map(([item, count]) => (
+              <View key={item} style={[styles.buyEvidencePill, count > 0 && styles.buyEvidencePillActive]}>
+                <Ionicons name={count > 0 ? 'checkmark-circle-outline' : 'ellipse-outline'} size={14} color={count > 0 ? '#22C55E' : '#94A3B8'} />
                 <Text style={styles.buyEvidenceText}>{item}</Text>
+                <Text style={styles.buyEvidenceCount}>{count}</Text>
               </View>
             ))}
           </View>
@@ -2392,18 +2568,43 @@ export default function PropertyDeckScreen({ route }) {
 
         <View style={styles.buySection}>
           <Text style={styles.buySectionEyebrow}>Documents, notes & timeline</Text>
-          <View style={styles.buyToolRow}>
-            {[
-              ['folder-open-outline', 'Document storage', 'Mortgage, ID, solicitor and survey files'],
-              ['document-text-outline', 'Notes review', 'Questions, observations and evidence'],
-              ['calendar-outline', 'Timeline tracking', 'Offer, mortgage, searches and completion'],
-            ].map(([icon, title, copy]) => (
-              <View key={title} style={styles.buyToolCard}>
-                <Ionicons name={icon} size={20} color={APP_PURPLE} />
-                <Text style={styles.buyToolTitle}>{title}</Text>
-                <Text style={styles.buyToolCopy}>{copy}</Text>
-              </View>
-            ))}
+          <View style={styles.buyDataPanel}>
+            <View style={styles.buyDataBlock}>
+              <Text style={styles.buyDataBlockTitle}>Media & documents</Text>
+              {buyerDecisionMedia.length ? buyerDecisionMedia.slice(0, 8).map(renderBuyerMediaRow) : renderBuyEmptyState('No media or documents have been added from the Decision Board yet.')}
+            </View>
+
+            <View style={styles.buyDataBlock}>
+              <Text style={styles.buyDataBlockTitle}>Notes</Text>
+              {buyerDecisionNotes.length ? buyerDecisionNotes.slice(0, 6).map(renderBuyerNoteRow) : renderBuyEmptyState('No Decision Board notes yet.')}
+            </View>
+
+            <View style={styles.buyDataBlock}>
+              <Text style={styles.buyDataBlockTitle}>Timeline</Text>
+              {buyerDecisionTimeline.length ? buyerDecisionTimeline.slice(0, 6).map(renderBuyerTimelineRow) : renderBuyEmptyState('No Decision Board timeline events yet.')}
+            </View>
+
+            <View style={styles.buyDataBlock}>
+              <Text style={styles.buyDataBlockTitle}>Tasks</Text>
+              {buyerDecisionTasks.length ? buyerDecisionTasks.slice(0, 6).map(renderBuyerTaskRow) : renderBuyEmptyState('No Decision Board tasks yet.')}
+            </View>
+
+            <View style={styles.buyDataBlock}>
+              <Text style={styles.buyDataBlockTitle}>Linked contacts</Text>
+              {[...buyerDecisionAgents.map((item) => ['agent', item]), ...buyerDecisionBrokers.map((item) => ['broker', item])].length ? (
+                [...buyerDecisionAgents.map((item) => ['agent', item]), ...buyerDecisionBrokers.map((item) => ['broker', item])].slice(0, 6).map(([type, item], index) => (
+                  <View key={`${type}-${item.id || item.ID || index}`} style={styles.buyDataRow}>
+                    <View style={styles.buyDataIcon}>
+                      <Ionicons name={type === 'broker' ? 'business-outline' : 'person-outline'} size={17} color={APP_PURPLE} />
+                    </View>
+                    <View style={styles.buyDataBody}>
+                      <Text style={styles.buyDataTitle} numberOfLines={1}>{getParticipantName(item, type)}</Text>
+                      <Text style={styles.buyDataMeta}>{type === 'broker' ? 'Broker' : 'Agent'}</Text>
+                    </View>
+                  </View>
+                ))
+              ) : renderBuyEmptyState('No agents or brokers are linked to this listing yet.')}
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -3549,11 +3750,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
+  buyEvidencePillActive: {
+    borderColor: '#BBF7D0',
+    backgroundColor: '#F0FDF4',
+  },
   buyEvidenceText: {
     color: '#334155',
     fontSize: 12,
     fontWeight: '800',
     marginLeft: 6,
+  },
+  buyEvidenceCount: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 7,
   },
   buyDecisionButton: {
     alignItems: 'center',
@@ -3593,6 +3804,69 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 17,
     marginTop: 4,
+  },
+  buyDataPanel: {
+    gap: 10,
+  },
+  buyDataBlock: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+  },
+  buyDataBlockTitle: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  buyDataRow: {
+    alignItems: 'center',
+    borderTopColor: '#F1F5F9',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingTop: 8,
+  },
+  buyDataIcon: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  buyDataBody: {
+    flex: 1,
+    marginLeft: 9,
+  },
+  buyDataTitle: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    lineHeight: 18,
+  },
+  buyDataCopy: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  buyDataMeta: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  buyEmptyText: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 6,
   },
   columnsContainer: {
     flex: 1,
