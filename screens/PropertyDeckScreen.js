@@ -1440,6 +1440,23 @@ export default function PropertyDeckScreen({ route }) {
     });
   };
 
+  const goBackFromBuy = () => {
+    if (buyerWorkspaceContext && buyerContextBoard?.id) {
+      navigation.navigate('DecisionBoard', {
+        decisionBoardId: buyerContextBoard.id,
+        decisionBoard: buyerContextBoard,
+      });
+      return;
+    }
+
+    if (buyerWorkspaceContext) {
+      openDecisionBoardsForDeck();
+      return;
+    }
+
+    setMode('shortlist');
+  };
+
   const handleFlowStepPress = (stepKey) => {
     if (stepKey === 'decision') {
       openDecisionBoardsForDeck();
@@ -2466,7 +2483,7 @@ export default function PropertyDeckScreen({ route }) {
   const renderBuyScreen = () => (
     <>
       <View style={styles.detailHeader}>
-        <TouchableOpacity style={styles.backButton} onPress={() => setMode('shortlist')}>
+        <TouchableOpacity style={styles.backButton} onPress={goBackFromBuy}>
           <Ionicons name="arrow-back" size={22} color="#111827" />
         </TouchableOpacity>
         <View style={styles.detailHeaderText}>
