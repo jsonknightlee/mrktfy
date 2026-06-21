@@ -377,6 +377,15 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
     });
   };
 
+  const viewInBuy = () => {
+    navigation.navigate('Tabs', {
+      screen: 'Buy',
+      params: {
+        focusWorkspaceItemId: buyerWorkspaceItem?.id,
+      },
+    });
+  };
+
   useFocusEffect(useCallback(() => {
     let isActive = true;
 
@@ -921,7 +930,12 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
             <Ionicons name="home-outline" size={18} color="#FFFFFF" />
             <Text style={styles.moveToBuyButtonText}>Move to Buy</Text>
           </TouchableOpacity>
-        ) : null}
+        ) : (
+          <TouchableOpacity style={styles.viewInBuyButton} activeOpacity={0.86} onPress={viewInBuy}>
+            <Ionicons name="arrow-forward-circle-outline" size={18} color={APP_PURPLE} />
+            <Text style={styles.viewInBuyButtonText}>View in Buy</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Status</Text>
@@ -1231,6 +1245,8 @@ const styles = StyleSheet.create({
   loadingHint: { color: '#94A3B8', fontSize: 12, fontWeight: '800', marginTop: 8 },
   moveToBuyButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, flexDirection: 'row', justifyContent: 'center', marginBottom: 14, minHeight: 44 },
   moveToBuyButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', marginLeft: 8 },
+  viewInBuyButton: { alignItems: 'center', backgroundColor: '#EEF2FF', borderColor: '#C7D2FE', borderRadius: 8, borderWidth: 1, flexDirection: 'row', justifyContent: 'center', marginBottom: 14, minHeight: 44 },
+  viewInBuyButtonText: { color: APP_PURPLE, fontSize: 14, fontWeight: '900', marginLeft: 8 },
   section: { backgroundColor: '#FFFFFF', borderRadius: 8, marginBottom: 14, padding: 14 },
   sectionHeaderRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   sectionTitle: { color: '#111827', fontSize: 15, fontWeight: '900' },
