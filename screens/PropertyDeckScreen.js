@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -36,6 +37,7 @@ import {
 } from '../services/PropertyDeckService';
 
 const APP_PURPLE = '#6366F1';
+const BUY_CHECKLIST_PROGRESS_KEY = 'mrktfy_buy_checklist_progress';
 const SWIPE_THRESHOLD = 90;
 const RICH_FILTER_ENRICHMENT_MATCH_LIMIT = 20;
 const FLOW_STEPS = [
@@ -44,6 +46,7 @@ const FLOW_STEPS = [
   { key: 'decision', label: 'Decision' },
   { key: 'buy', label: 'Buy' },
 ];
+const ROUTE_FLOW_MODES = new Set(['detail', 'shortlist', 'buy']);
 
 const BUY_CHECKLIST = [
   {
@@ -748,6 +751,9 @@ export default function PropertyDeckScreen({ route }) {
   const lastRichFilterEnrichmentKeyRef = useRef(null);
   const shortlistRemovalTimersRef = useRef(new Map());
   const loadedDeckContentIdRef = useRef(null);
+  const buyScrollRef = useRef(null);
+  const buyerAssistantSectionYRef = useRef(0);
+  const buyerAssistantSuccessTimerRef = useRef(null);
   const [mode, setMode] = useState('list');
   const [decks, setDecks] = useState([]);
   const [selectedDeckId, setSelectedDeckId] = useState(null);
@@ -766,6 +772,9 @@ export default function PropertyDeckScreen({ route }) {
   const [buyerAssistantResult, setBuyerAssistantResult] = useState(null);
   const [buyerAssistantLoading, setBuyerAssistantLoading] = useState(false);
   const [buyerAssistantError, setBuyerAssistantError] = useState('');
+  const [buyerAssistantSuccess, setBuyerAssistantSuccess] = useState('');
+  const [buyerWorkspaceContext, setBuyerWorkspaceContext] = useState(null);
+  const [buyChecklistProgress, setBuyChecklistProgress] = useState({});
 
   const deckLimit = getPropertyDeckLimit(currentTier);
   const selectedDeck = decks.find((deck) => String(deck.id) === String(selectedDeckId)) || null;
@@ -814,6 +823,7 @@ export default function PropertyDeckScreen({ route }) {
   );
   const currentListing = filteredDeckListings[currentIndex];
   const canCreateDeck = deckLimit > 0 && decks.length < deckLimit;
+  const buyerWorkspaceItemId = buyerWorkspaceContext?.buyerWorkspaceItemId || buyerWorkspaceContext?.id || null;
 
   const loadDecks = useCallback(async () => {
     setLoading(true);
@@ -914,6 +924,9 @@ export default function PropertyDeckScreen({ route }) {
   useEffect(() => () => {
     shortlistRemovalTimersRef.current.forEach((timer) => clearTimeout(timer));
     shortlistRemovalTimersRef.current.clear();
+    if (buyerAssistantSuccessTimerRef.current) {
+      clearTimeout(buyerAssistantSuccessTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -998,12 +1011,26 @@ export default function PropertyDeckScreen({ route }) {
   useFocusEffect(
     useCallback(() => {
       const routeDeckId = route?.params?.openDeckId;
-      if (routeDeckId && handledOpenDeckIdRef.current !== routeDeckId) {
-        handledOpenDeckIdRef.current = routeDeckId;
+      const routeOpenMode = ROUTE_FLOW_MODES.has(route?.params?.openMode) ? route.params.openMode : 'detail';
+      const routeOpenKey = routeDeckId ? `${routeDeckId}:${routeOpenMode}` : null;
+      const routeBuyerContext = route?.params?.buyerWorkspaceContext || null;
+
+      if (routeBuyerContext) {
+        setBuyerWorkspaceContext(routeBuyerContext);
+      }
+
+      if (routeDeckId && handledOpenDeckIdRef.current !== routeOpenKey) {
+        handledOpenDeckIdRef.current = routeOpenKey;
         setSelectedDeckId(routeDeckId);
-        setMode('detail');
+        setMode(routeOpenMode);
         loadSelectedDeck(routeDeckId);
+        navigation.setParams?.({ openDeckId: undefined, openMode: undefined, buyerWorkspaceContext: undefined });
         return;
+      }
+
+      if (!routeDeckId && ROUTE_FLOW_MODES.has(route?.params?.openMode)) {
+        setMode(routeOpenMode);
+        navigation.setParams?.({ openMode: undefined, buyerWorkspaceContext: undefined });
       }
 
       if ((mode === 'detail' || mode === 'shortlist') && selectedDeckId) {
@@ -1013,7 +1040,7 @@ export default function PropertyDeckScreen({ route }) {
       } else {
         loadDecks();
       }
-    }, [loadDecks, loadSelectedDeck, mode, route?.params?.openDeckId, selectedDeckId])
+    }, [loadDecks, loadSelectedDeck, mode, navigation, route?.params?.buyerWorkspaceContext, route?.params?.openDeckId, route?.params?.openMode, selectedDeckId])
   );
 
   const cardStyle = useMemo(() => {
@@ -1384,6 +1411,11 @@ export default function PropertyDeckScreen({ route }) {
   const handleFlowStepPress = (stepKey) => {
     if (stepKey === 'decision') {
       openDecisionBoardsForDeck();
+      return;
+    }
+
+    if (stepKey === 'buy') {
+      navigation.navigate('Buy');
       return;
     }
 
@@ -1963,35 +1995,107 @@ export default function PropertyDeckScreen({ route }) {
     </>
   );
 
-  const completedBuySteps = BUY_CHECKLIST.filter((step) => step.status === 'Completed').length;
-  const activeBuyStep = BUY_CHECKLIST.find((step) => step.status !== 'Completed') || BUY_CHECKLIST[BUY_CHECKLIST.length - 1];
-  const buyProgress = Math.round((completedBuySteps / BUY_CHECKLIST.length) * 100);
+  const buyerContextBoard = buyerWorkspaceContext?.decisionBoard || null;
+  const buyerContextDecisionListing = buyerWorkspaceContext?.decisionBoardListing || null;
+  const buyerContextListing = buyerContextDecisionListing?.listing || buyerWorkspaceContext?.listing || null;
+  const buyerFocusListing = buyerContextListing || visibleShortlist[0] || selectedShortlist[0] || null;
+  const buyerContextTitle = buyerContextBoard?.boardName || buyerContextBoard?.name || selectedDeck?.name || 'Buyer workspace';
+  const buyerContextStatus = buyerContextDecisionListing?.listingStatus || buyerContextDecisionListing?.trafficLightStatus || null;
+  const buyChecklistStorageKey = `${BUY_CHECKLIST_PROGRESS_KEY}:${buyerWorkspaceItemId || getListingId(buyerFocusListing) || selectedDeckId || 'default'}`;
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadBuyChecklistProgress = async () => {
+      try {
+        const value = await AsyncStorage.getItem(buyChecklistStorageKey);
+        if (!isCancelled) {
+          setBuyChecklistProgress(value ? JSON.parse(value) || {} : {});
+        }
+      } catch {
+        if (!isCancelled) setBuyChecklistProgress({});
+      }
+    };
+
+    loadBuyChecklistProgress();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [buyChecklistStorageKey]);
+
+  const persistBuyChecklistProgress = async (nextProgress) => {
+    setBuyChecklistProgress(nextProgress);
+    try {
+      await AsyncStorage.setItem(buyChecklistStorageKey, JSON.stringify(nextProgress));
+    } catch {}
+  };
+
+  const getBuyTaskKey = (stepIndex, taskIndex) => `${stepIndex}:${taskIndex}`;
+  const totalBuyTasks = BUY_CHECKLIST.reduce((count, step) => count + step.tasks.length, 0);
+  const completedBuyTasks = Object.values(buyChecklistProgress).filter(Boolean).length;
+  const buyProgress = totalBuyTasks ? Math.round((completedBuyTasks / totalBuyTasks) * 100) : 0;
+  const completedBuySteps = BUY_CHECKLIST.filter((step, stepIndex) => (
+    step.tasks.every((_, taskIndex) => buyChecklistProgress[getBuyTaskKey(stepIndex, taskIndex)])
+  )).length;
+  const activeBuyStep = BUY_CHECKLIST.find((step, stepIndex) => (
+    !step.tasks.every((_, taskIndex) => buyChecklistProgress[getBuyTaskKey(stepIndex, taskIndex)])
+  )) || BUY_CHECKLIST[BUY_CHECKLIST.length - 1];
+
+  const toggleBuyTask = (stepIndex, taskIndex) => {
+    const taskKey = getBuyTaskKey(stepIndex, taskIndex);
+    const nextProgress = {
+      ...buyChecklistProgress,
+      [taskKey]: !buyChecklistProgress[taskKey],
+    };
+    persistBuyChecklistProgress(nextProgress);
+  };
 
   const renderBuyChecklistItem = (step, index) => {
-    const statusStyle = step.status === 'Completed'
+    const completedTaskCount = step.tasks.filter((_, taskIndex) => buyChecklistProgress[getBuyTaskKey(index, taskIndex)]).length;
+    const isComplete = completedTaskCount === step.tasks.length;
+    const isInProgress = completedTaskCount > 0 && !isComplete;
+    const status = isComplete ? 'Completed' : isInProgress ? 'In Progress' : 'Not Started';
+    const statusStyle = isComplete
       ? styles.buyStatusComplete
-      : step.status === 'In Progress'
+      : isInProgress
         ? styles.buyStatusInProgress
         : styles.buyStatusNotStarted;
 
     return (
-      <View key={step.title} style={styles.buyChecklistCard}>
+      <View key={step.title} style={[styles.buyChecklistCard, isComplete && styles.buyChecklistCardComplete]}>
         <View style={styles.buyChecklistHeader}>
-          <View style={styles.buyStepNumber}>
-            <Text style={styles.buyStepNumberText}>{index + 1}</Text>
+          <View style={[styles.buyStepNumber, isComplete && styles.buyStepNumberComplete]}>
+            {isComplete ? (
+              <Ionicons name="checkmark" size={17} color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buyStepNumberText}>{index + 1}</Text>
+            )}
           </View>
           <View style={styles.buyChecklistTitleWrap}>
-            <Text style={styles.buyChecklistTitle}>{step.title}</Text>
-            <Text style={[styles.buyStatusText, statusStyle]}>{step.status}</Text>
+            <Text style={[styles.buyChecklistTitle, isComplete && styles.buyChecklistTitleComplete]}>{step.title}</Text>
+            <Text style={[styles.buyStatusText, statusStyle]}>{status} / {completedTaskCount}/{step.tasks.length}</Text>
           </View>
         </View>
         <View style={styles.buyTaskList}>
-          {step.tasks.slice(0, 4).map((task) => (
-            <View key={task} style={styles.buyTaskRow}>
-              <Ionicons name="ellipse-outline" size={13} color="#94A3B8" />
-              <Text style={styles.buyTaskText}>{task}</Text>
-            </View>
-          ))}
+          {step.tasks.map((task, taskIndex) => {
+            const isChecked = Boolean(buyChecklistProgress[getBuyTaskKey(index, taskIndex)]);
+            return (
+              <TouchableOpacity
+                key={task}
+                style={[styles.buyTaskRow, isChecked && styles.buyTaskRowComplete]}
+                activeOpacity={0.78}
+                onPress={() => toggleBuyTask(index, taskIndex)}
+              >
+                <Ionicons
+                  name={isChecked ? 'radio-button-on' : 'radio-button-off'}
+                  size={17}
+                  color={isChecked ? '#22C55E' : '#94A3B8'}
+                />
+                <Text style={[styles.buyTaskText, isChecked && styles.buyTaskTextComplete]}>{task}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
         <View style={styles.buyQuestionPanel}>
           {step.questions.slice(0, 2).map((question) => (
@@ -2007,15 +2111,35 @@ export default function PropertyDeckScreen({ route }) {
 
     setBuyerAssistantLoading(true);
     setBuyerAssistantError('');
+    setBuyerAssistantSuccess('');
     try {
       const assistant = await askBuyerWorkspaceAssistant({
         mode: buyerAssistantMode,
         scenario: buyerAssistantInput,
+        buyerWorkspaceItemId: buyerWorkspaceContext?.buyerWorkspaceItemId,
         propertyDeckId: selectedDeckId,
+        decisionBoardId: buyerContextBoard?.id,
+        decisionBoardListingId: buyerContextDecisionListing?.id,
+        listingId: getListingId(buyerFocusListing),
       });
       setBuyerAssistantResult(assistant);
+      setBuyerAssistantInput('');
+      setBuyerAssistantSuccess('Strategy generated. Review the updated recommendation, options and draft below.');
+      requestAnimationFrame(() => {
+        buyScrollRef.current?.scrollTo({
+          y: Math.max(0, buyerAssistantSectionYRef.current - 12),
+          animated: true,
+        });
+      });
+      if (buyerAssistantSuccessTimerRef.current) {
+        clearTimeout(buyerAssistantSuccessTimerRef.current);
+      }
+      buyerAssistantSuccessTimerRef.current = setTimeout(() => {
+        setBuyerAssistantSuccess('');
+      }, 6500);
     } catch (error) {
       setBuyerAssistantError(error?.response?.data?.error || error?.message || 'Could not reach the AI assistant. Showing the local playbook.');
+      setBuyerAssistantSuccess('');
       setBuyerAssistantResult(null);
     } finally {
       setBuyerAssistantLoading(false);
@@ -2025,16 +2149,22 @@ export default function PropertyDeckScreen({ route }) {
   const renderBuyerAssistantWorkspace = () => {
     const modeConfig = BUY_ASSISTANT_MODES.find((item) => item.key === buyerAssistantMode) || BUY_ASSISTANT_MODES[0];
     const playbook = buyerAssistantResult || BUY_ASSISTANT_PLAYBOOK[buyerAssistantMode] || BUY_ASSISTANT_PLAYBOOK.offer;
-    const focusListing = visibleShortlist[0] || selectedShortlist[0] || null;
-    const listingTitle = focusListing?.Title || focusListing?.Address || focusListing?.title || 'top shortlisted property';
-    const listingPrice = formatPrice(focusListing?.Price || focusListing?.price);
-    const yourFitRank = getRankNumber(focusListing, 'yourFit');
-    const overallRank = getRankNumber(focusListing, 'overall');
+    const listingTitle = buyerFocusListing?.Title || buyerFocusListing?.Address || buyerFocusListing?.title || 'top shortlisted property';
+    const listingPrice = formatPrice(buyerFocusListing?.Price || buyerFocusListing?.price);
+    const yourFitRank = getRankNumber(buyerFocusListing, 'yourFit');
+    const overallRank = getRankNumber(buyerFocusListing, 'overall');
     const hasRank = Number.isFinite(yourFitRank) || Number.isFinite(overallRank);
     const scenarioText = buyerAssistantInput.trim();
+    const hasGeneratedStrategy = Boolean(buyerAssistantResult);
+    const highlightGeneratedSections = Boolean(buyerAssistantSuccess && hasGeneratedStrategy);
 
     return (
-      <View style={styles.buyAssistantSection}>
+      <View
+        style={styles.buyAssistantSection}
+        onLayout={(event) => {
+          buyerAssistantSectionYRef.current = event.nativeEvent.layout.y;
+        }}
+      >
         <View style={styles.buyAssistantHeader}>
           <View style={styles.buyAssistantIcon}>
             <Ionicons name="sparkles" size={20} color="#FFFFFF" />
@@ -2069,7 +2199,10 @@ export default function PropertyDeckScreen({ route }) {
           <Text style={styles.buyScenarioLabel}>What happened?</Text>
           <TextInput
             value={buyerAssistantInput}
-            onChangeText={setBuyerAssistantInput}
+            onChangeText={(value) => {
+              setBuyerAssistantInput(value);
+              if (buyerAssistantSuccess) setBuyerAssistantSuccess('');
+            }}
             placeholder={modeConfig.placeholder}
             placeholderTextColor="#94A3B8"
             multiline
@@ -2099,22 +2232,29 @@ export default function PropertyDeckScreen({ route }) {
           </View>
         )}
 
+        {!!buyerAssistantSuccess && (
+          <View style={styles.buyAssistantSuccess}>
+            <Ionicons name="checkmark-circle-outline" size={16} color="#15803D" />
+            <Text style={styles.buyAssistantSuccessText}>{buyerAssistantSuccess}</Text>
+          </View>
+        )}
+
         <View style={styles.buyContextStrip}>
           <Text style={styles.buyContextText} numberOfLines={2}>
             Context: {listingTitle}{listingPrice ? ` / ${listingPrice}` : ''}{hasRank ? ` / ${Number.isFinite(yourFitRank) ? `Your fit #${yourFitRank}` : `Deck #${overallRank}`}` : ''}
           </Text>
         </View>
 
-        <View style={styles.buyStrategyCard}>
+        <View style={[styles.buyStrategyCard, highlightGeneratedSections && styles.buyGeneratedHighlight]}>
           <Text style={styles.buyStrategyLabel}>{playbook.title}</Text>
           <Text style={styles.buyStrategyRecommendation}>
-            {scenarioText ? playbook.recommendation : `${playbook.recommendation} Add the latest agent message, offer idea or survey concern above to make this workspace specific.`}
+            {(scenarioText || hasGeneratedStrategy) ? playbook.recommendation : `${playbook.recommendation} Add the latest agent message, offer idea or survey concern above to make this workspace specific.`}
           </Text>
         </View>
 
         <View style={styles.buyOptionGrid}>
           {playbook.options.map((option) => (
-            <View key={option.label} style={styles.buyOptionCard}>
+            <View key={option.label} style={[styles.buyOptionCard, highlightGeneratedSections && styles.buyGeneratedHighlight]}>
               <Text style={styles.buyOptionLabel}>{option.label}</Text>
               <Text style={styles.buyOptionAction}>{option.action}</Text>
               <Text style={styles.buyOptionReasoning}>{option.reasoning}</Text>
@@ -2122,7 +2262,7 @@ export default function PropertyDeckScreen({ route }) {
           ))}
         </View>
 
-        <View style={styles.buyDraftCard}>
+        <View style={[styles.buyDraftCard, highlightGeneratedSections && styles.buyGeneratedHighlight]}>
           <View style={styles.buyDraftHeader}>
             <Ionicons name="mail-outline" size={17} color={APP_PURPLE} />
             <Text style={styles.buyDraftTitle}>Agent message draft</Text>
@@ -2131,13 +2271,13 @@ export default function PropertyDeckScreen({ route }) {
         </View>
 
         <View style={styles.buyInsightGrid}>
-          <View style={styles.buyInsightCard}>
+          <View style={[styles.buyInsightCard, highlightGeneratedSections && styles.buyGeneratedHighlight]}>
             <Text style={styles.buyInsightTitle}>Risks</Text>
             {playbook.risks.map((risk) => (
               <Text key={risk} style={styles.buyInsightText}>{risk}</Text>
             ))}
           </View>
-          <View style={styles.buyInsightCard}>
+          <View style={[styles.buyInsightCard, highlightGeneratedSections && styles.buyGeneratedHighlight]}>
             <Text style={styles.buyInsightTitle}>Next questions</Text>
             {playbook.questions.map((question) => (
               <Text key={question} style={styles.buyInsightText}>{question}</Text>
@@ -2164,7 +2304,7 @@ export default function PropertyDeckScreen({ route }) {
 
       {renderFlowSteps()}
 
-      <ScrollView contentContainerStyle={styles.buyScrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={buyScrollRef} contentContainerStyle={styles.buyScrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.buyHero}>
           <View style={styles.buyHeroIcon}>
             <Ionicons name="home" size={24} color="#FFFFFF" />
@@ -2176,6 +2316,23 @@ export default function PropertyDeckScreen({ route }) {
             </Text>
           </View>
         </View>
+
+        {buyerWorkspaceContext ? (
+          <View style={styles.buySourceCard}>
+            <View style={styles.buySourceIcon}>
+              <Ionicons name="flag-outline" size={18} color={APP_PURPLE} />
+            </View>
+            <View style={styles.buySourceBody}>
+              <Text style={styles.buySourceEyebrow}>Moved from Decision Board</Text>
+              <Text style={styles.buySourceTitle} numberOfLines={2}>
+                {buyerFocusListing?.Title || buyerFocusListing?.Address || buyerFocusListing?.title || 'Decision property'}
+              </Text>
+              <Text style={styles.buySourceMeta} numberOfLines={1}>
+                {buyerContextTitle}{buyerContextStatus ? ` / ${buyerContextStatus}` : ''}
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.buyProgressCard}>
           <View style={styles.buyProgressHeader}>
@@ -2898,6 +3055,47 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 4,
   },
+  buySourceCard: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#C7D2FE',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginBottom: 12,
+    padding: 12,
+  },
+  buySourceIcon: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    height: 38,
+    justifyContent: 'center',
+    marginRight: 10,
+    width: 38,
+  },
+  buySourceBody: {
+    flex: 1,
+  },
+  buySourceEyebrow: {
+    color: APP_PURPLE,
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  buySourceTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  buySourceMeta: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 3,
+  },
   buyProgressCard: {
     backgroundColor: '#FFFFFF',
     borderColor: '#E5E7EB',
@@ -2959,6 +3157,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 12,
   },
+  buyChecklistCardComplete: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#BBF7D0',
+    opacity: 0.88,
+  },
   buyChecklistHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -2972,6 +3175,9 @@ const styles = StyleSheet.create({
     marginRight: 10,
     width: 34,
   },
+  buyStepNumberComplete: {
+    backgroundColor: '#22C55E',
+  },
   buyStepNumberText: {
     color: APP_PURPLE,
     fontSize: 13,
@@ -2984,6 +3190,9 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontSize: 14,
     fontWeight: '900',
+  },
+  buyChecklistTitleComplete: {
+    color: '#64748B',
   },
   buyStatusText: {
     alignSelf: 'flex-start',
@@ -3008,12 +3217,22 @@ const styles = StyleSheet.create({
     color: '#64748B',
   },
   buyTaskList: {
-    gap: 6,
+    gap: 7,
     marginTop: 10,
   },
   buyTaskRow: {
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    borderWidth: 1,
     flexDirection: 'row',
+    minHeight: 38,
+    paddingHorizontal: 10,
+  },
+  buyTaskRowComplete: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
   },
   buyTaskText: {
     color: '#475569',
@@ -3021,6 +3240,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginLeft: 7,
+  },
+  buyTaskTextComplete: {
+    color: '#15803D',
+    textDecorationLine: 'line-through',
   },
   buyQuestionPanel: {
     backgroundColor: '#F8FAFC',
@@ -3155,6 +3378,24 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginLeft: 7,
   },
+  buyAssistantSuccess: {
+    alignItems: 'flex-start',
+    backgroundColor: '#DCFCE7',
+    borderColor: '#86EFAC',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: 10,
+    padding: 10,
+  },
+  buyAssistantSuccessText: {
+    color: '#166534',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 17,
+    marginLeft: 7,
+  },
   buyContextStrip: {
     backgroundColor: '#EEF2FF',
     borderRadius: 8,
@@ -3171,8 +3412,13 @@ const styles = StyleSheet.create({
   buyStrategyCard: {
     backgroundColor: '#F8FAFC',
     borderRadius: 8,
+    borderColor: 'transparent',
+    borderWidth: 1,
     marginTop: 10,
     padding: 10,
+  },
+  buyGeneratedHighlight: {
+    borderColor: '#22C55E',
   },
   buyStrategyLabel: {
     color: '#111827',

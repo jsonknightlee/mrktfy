@@ -22,6 +22,8 @@ import NotificationListingsScreen from '../screens/NotificationListingsScreen';
 import SubscriptionScreen from '../screens/SubscriptionScreen';
 import PaymentScreen from '../screens/PaymentScreen';
 import BuyerPreferencesScreen from '../screens/BuyerPreferencesScreen';
+import BuyerWorkspaceScreen from '../screens/BuyerWorkspaceScreen';
+import ContactAgentScreen from '../screens/ContactAgentScreen';
 
 import { AuthContext } from '../contexts/AuthContext';
 import NotificationBadge from '../components/NotificationBadge';
@@ -44,9 +46,9 @@ function MainTabs() {
         options={{ tabBarIcon: ({ color, size }) => <Ionicons name="albums" size={size} color={color} /> }}
       />
       <Tab.Screen
-        name="Decision"
-        component={DecisionBoardListScreen}
-        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="flag" size={size} color={color} /> }}
+        name="Buy"
+        component={BuyerWorkspaceScreen}
+        options={{ tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} /> }}
       />
       <Tab.Screen
         name="AR"
@@ -159,6 +161,15 @@ export default function AppNavigator() {
             <Stack.Screen
               name="BuyerPreferences"
               component={BuyerPreferencesScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="ContactAgent"
+              component={ContactAgentScreen}
               options={{
                 headerShown: false,
                 gestureEnabled: true,

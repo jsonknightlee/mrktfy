@@ -206,6 +206,12 @@ const normalizeMedia = (media) => {
     fileUrl: getValue(media, ['fileUrl', 'FileUrl', 'url', 'Url'], ''),
     caption: getValue(media, ['caption', 'Caption'], null),
     isPublic: Boolean(getValue(media, ['isPublic', 'IsPublic'], false)),
+    storageProvider: getValue(media, ['storageProvider', 'StorageProvider'], null),
+    storageBucket: getValue(media, ['storageBucket', 'StorageBucket'], null),
+    storageKey: getValue(media, ['storageKey', 'StorageKey'], null),
+    originalFileName: getValue(media, ['originalFileName', 'OriginalFileName'], null),
+    mimeType: getValue(media, ['mimeType', 'MimeType'], null),
+    fileSizeBytes: getValue(media, ['fileSizeBytes', 'FileSizeBytes'], null),
     createdAt: getValue(media, ['createdAt', 'CreatedAt'], null),
     updatedAt: getValue(media, ['updatedAt', 'UpdatedAt'], null),
   };
@@ -331,6 +337,8 @@ export const normalizeDecisionBoard = (board) => {
     ...board,
     id: stringifyId(getValue(board, ['id', 'ID'])),
     userId: stringifyId(getValue(board, ['userId', 'UserID'])),
+    propertyDeckId: stringifyId(getValue(board, ['propertyDeckId', 'PropertyDeckID', 'PropertyDeckId'])),
+    shortListId: stringifyId(getValue(board, ['shortListId', 'ShortListID', 'ShortlistID', 'shortlistId'])),
     boardName: getValue(board, ['boardName', 'BoardName', 'name', 'Name'], 'Decision Board'),
     boardType,
     status,
@@ -598,6 +606,39 @@ export const addDecisionBoardTimelineEvent = async (decisionBoardListingId, payl
   );
 
   return normalizeTimelineEvent(data?.timelineEvent || data?.event || data);
+};
+
+export const addDecisionBoardMedia = async (decisionBoardListingId, payload = {}) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+
+  const { data } = await api.post(
+    `/api/decision-board-listings/${decisionBoardListingId}/media`,
+    compactPayload(payload)
+  );
+
+  return normalizeMedia(data?.media || data);
+};
+
+export const createDecisionBoardMediaUploadUrl = async (decisionBoardListingId, payload = {}) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+
+  const { data } = await api.post(
+    `/api/decision-board-listings/${decisionBoardListingId}/media/upload-url`,
+    compactPayload(payload)
+  );
+
+  return data;
+};
+
+export const getDecisionBoardMediaOpenUrl = async (decisionBoardListingId, mediaId) => {
+  requireId(decisionBoardListingId, 'decisionBoardListingId');
+  requireId(mediaId, 'mediaId');
+
+  const { data } = await api.get(
+    `/api/decision-board-listings/${decisionBoardListingId}/media/${mediaId}/open-url`
+  );
+
+  return data?.url || '';
 };
 
 export const addDecisionBoardNote = async (decisionBoardListingId, payload = {}) => {

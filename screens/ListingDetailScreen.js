@@ -76,6 +76,7 @@ const hasInfoData = (value) => {
 
 export default function ListingDetailScreen({ route, navigation }) {
   const listing = normalizeDetailListing(route.params?.listing);
+  const openedFromDecisionBoard = route.params?.source === 'decisionBoard' || Boolean(route.params?.decisionBoardListingId);
   const modalRef = useRef(null);
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -177,7 +178,7 @@ useEffect(() => {
   };
 
   const openDial = () => Linking.openURL(`tel:${listing.AgentPhone}`);
-  const openMail = () => Linking.openURL(`mailto:${listing.AgentEmail}`);
+  const openAgentEnquiry = () => navigation.navigate('ContactAgent', { listing });
 
   const openDecisionBoard = async () => {
     const listingId = getListingId(listing);
@@ -308,13 +309,15 @@ useEffect(() => {
 
         <Text style={styles.description}>{String(listing.Description || '')}</Text>
 
-        <TouchableOpacity
-          style={styles.decisionButton}
-          onPress={openDecisionBoard}
-        >
-          <Ionicons name="flag-outline" size={20} color="#fff" />
-          <Text style={styles.decisionButtonText}>Pursue in Decision Board</Text>
-        </TouchableOpacity>
+        {!openedFromDecisionBoard ? (
+          <TouchableOpacity
+            style={styles.decisionButton}
+            onPress={openDecisionBoard}
+          >
+            <Ionicons name="flag-outline" size={20} color="#fff" />
+            <Text style={styles.decisionButtonText}>Pursue in Decision Board</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Mini Map */}
         <TouchableOpacity onPress={openMap} style={styles.mapContainer} activeOpacity={0.9}>
@@ -363,9 +366,9 @@ useEffect(() => {
             <Ionicons name="call" size={18} color="#fff" />
             <Text style={styles.contactText}>Call</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.contactBtn} onPress={openMail}>
+          <TouchableOpacity style={styles.contactBtn} onPress={openAgentEnquiry}>
             <Ionicons name="mail" size={18} color="#fff" />
-            <Text style={styles.contactText}>Email</Text>
+            <Text style={styles.contactText}>Enquire</Text>
           </TouchableOpacity>
         </View>
 
@@ -401,7 +404,7 @@ useEffect(() => {
         {/* Spacing before CTA */}
         <View style={styles.sectionSpacing} />
 
-        <TouchableOpacity style={styles.cta}>
+        <TouchableOpacity style={styles.cta} onPress={openAgentEnquiry}>
           <Text style={styles.ctaText}>Request Info / Book Viewing</Text>
         </TouchableOpacity>
 

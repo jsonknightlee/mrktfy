@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,26 +15,48 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ImageView from 'react-native-image-viewing';
+import { WebView } from 'react-native-webview';
 import {
+  addDecisionBoardMedia,
   addDecisionBoardNote,
   addDecisionBoardTask,
   addDecisionBoardTimelineEvent,
   attachDecisionBoardListingAgent,
   attachDecisionBoardListingBroker,
+  createDecisionBoardMediaUploadUrl,
   deleteDecisionBoardTask,
   deleteDecisionBoardNote,
   detachDecisionBoardListingAgent,
   detachDecisionBoardListingBroker,
   getDecisionBoard,
+  getDecisionBoardMediaOpenUrl,
   updateDecisionBoardNote,
   updateDecisionBoardListing,
   updateDecisionBoardTask,
   USER_VERDICTS,
 } from '../services/DecisionBoardService';
+import { getBuyerWorkspaceItems, saveBuyerWorkspaceItem } from '../services/BuyerWorkspaceStorageService';
 import { getListingById } from '../services/listingApi';
 
 const APP_PURPLE = '#6366F1';
 const LISTING_STATUSES = ['Active', 'Tentative', 'Closed'];
+const MEDIA_PICKER_OPTIONS = {
+  Photo: { icon: 'image-outline', label: 'Image', mimeTypes: ['image/*'] },
+  Video: { icon: 'videocam-outline', label: 'Video', mimeTypes: ['video/*'] },
+  Audio: { icon: 'mic-outline', label: 'Audio', mimeTypes: ['audio/*'] },
+  Document: {
+    icon: 'document-attach-outline',
+    label: 'Document',
+    mimeTypes: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+      'application/octet-stream',
+    ],
+  },
+};
 const TRAFFIC_LIGHT = {
   Active: { color: '#22C55E', label: 'Active / Green' },
   Tentative: { color: '#F97316', label: 'Tentative / Orange' },
@@ -73,6 +97,32 @@ const formatDate = (value) => {
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString();
 };
+
+const getMediaIcon = (mediaType) => {
+  if (mediaType === 'Photo') return 'image-outline';
+  if (mediaType === 'Video') return 'videocam-outline';
+  if (mediaType === 'Audio') return 'mic-outline';
+  return 'document-text-outline';
+};
+
+const isImageMedia = (item) => String(item?.mediaType || '').toLowerCase() === 'photo';
+const isVideoMedia = (item) => String(item?.mediaType || '').toLowerCase() === 'video';
+
+const createVideoHtml = (url, { autoplay = false } = {}) => `
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+    <style>
+      html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+      video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    </style>
+  </head>
+  <body>
+    <video src=${JSON.stringify(url)} controls playsinline ${autoplay ? 'autoplay' : ''} preload="metadata"></video>
+  </body>
+</html>
+`;
 
 const getListingTitle = (listing) => listing?.Title || listing?.title || listing?.Address || listing?.address || 'Decision property';
 const getListingPrice = (listing) => listing?.Price || listing?.price || '';
@@ -218,6 +268,17 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
   const [timelineNote, setTimelineNote] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedBrokerId, setSelectedBrokerId] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState(null);
+  const [taskAdding, setTaskAdding] = useState(false);
+  const [updatingTaskId, setUpdatingTaskId] = useState(null);
+  const [deletingTaskId, setDeletingTaskId] = useState(null);
+  const [timelineAdding, setTimelineAdding] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(null);
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState({});
+  const [imageViewerState, setImageViewerState] = useState({ visible: false, imageIndex: 0 });
+  const [videoViewer, setVideoViewer] = useState(null);
+  const [buyerWorkspaceItem, setBuyerWorkspaceItem] = useState(null);
 
   const listing = fullListing || decisionListing?.listing || {};
   const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
@@ -243,6 +304,78 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
     complete: tasks.filter(getTaskDone).length,
     total: tasks.length,
   }), [tasks]);
+  const imageMediaItems = useMemo(() => media.filter(isImageMedia), [media]);
+  const imageViewerImages = useMemo(() => (
+    imageMediaItems
+      .map((item) => ({ uri: mediaPreviewUrls[String(item.id)] || item.fileUrl }))
+      .filter((item) => Boolean(item.uri))
+  ), [imageMediaItems, mediaPreviewUrls]);
+  const boardPropertyDeckId = board?.propertyDeckId || board?.PropertyDeckID || board?.PropertyDeckId || null;
+  const isInBuyerWorkspace = Boolean(buyerWorkspaceItem);
+
+  useFocusEffect(useCallback(() => {
+    let isActive = true;
+
+    const refreshBuyerWorkspaceItem = async () => {
+      if (!decisionListing?.id) {
+        setBuyerWorkspaceItem(null);
+        return;
+      }
+
+      try {
+        const items = await getBuyerWorkspaceItems();
+        if (!isActive) return;
+
+        const listingId = decisionListing?.listingId || decisionListing?.ListingID || listing?.ID || listing?.id;
+        const matchedItem = items.find((item) => {
+          const itemDecisionListingId = item?.decisionBoardListingId || item?.DecisionBoardListingID;
+          if (itemDecisionListingId && String(itemDecisionListingId) === String(decisionListing.id)) return true;
+
+          const itemListingId = item?.listingId || item?.ListingID;
+          return Boolean(listingId && itemListingId && String(itemListingId) === String(listingId));
+        });
+
+        setBuyerWorkspaceItem(matchedItem || null);
+      } catch {
+        if (isActive) setBuyerWorkspaceItem(null);
+      }
+    };
+
+    refreshBuyerWorkspaceItem();
+
+    return () => {
+      isActive = false;
+    };
+  }, [decisionListing?.id, decisionListing?.listingId, decisionListing?.ListingID, listing?.ID, listing?.id]));
+
+  const moveToBuy = async () => {
+    const workspaceItem = await saveBuyerWorkspaceItem({
+      decisionBoardId: board?.id,
+      decisionBoardListingId: decisionListing?.id,
+      propertyDeckId: boardPropertyDeckId,
+      boardName: board?.boardName || board?.name || 'Decision Board',
+      listingTitle: getListingTitle(listing),
+      listingPrice: getListingPrice(listing),
+      listingImageUrl: imageUrl,
+      listingId: decisionListing?.listingId || decisionListing?.ListingID || listing?.ID || listing?.id,
+      listingStatus: decisionListing?.listingStatus || 'Active',
+      decisionBoard: board,
+      decisionBoardListing: {
+        ...decisionListing,
+        listing,
+      },
+      listing,
+    });
+
+    setBuyerWorkspaceItem(workspaceItem);
+
+    navigation.navigate('Tabs', {
+      screen: 'Buy',
+      params: {
+        focusWorkspaceItemId: workspaceItem.id,
+      },
+    });
+  };
 
   useFocusEffect(useCallback(() => {
     let isActive = true;
@@ -281,6 +414,34 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
     const firstLinkedBrokerId = getLinkedBrokerSelectionId(linkedBrokers[0], board?.brokers || []);
     setSelectedBrokerId(firstLinkedBrokerId);
   }, [linkedBrokers, board?.brokers]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const previewItems = media.filter((item) => (isImageMedia(item) || isVideoMedia(item)) && item?.id && item?.fileUrl);
+
+    if (!previewItems.length) {
+      setMediaPreviewUrls({});
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    Promise.all(previewItems.map(async (item) => {
+      try {
+        const url = await getDecisionBoardMediaOpenUrl(decisionListing.id, item.id);
+        return [String(item.id), url || item.fileUrl];
+      } catch {
+        return [String(item.id), item.fileUrl];
+      }
+    })).then((entries) => {
+      if (!isMounted) return;
+      setMediaPreviewUrls(Object.fromEntries(entries.filter(([, url]) => Boolean(url))));
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [decisionListing?.id, media]);
 
   useEffect(() => {
     const listingId = decisionListing?.listingId || decisionListing?.ListingID || listing?.ID;
@@ -338,13 +499,13 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
 
   const saveNotes = () => {
     const trimmed = notesDraft.trim();
-    if (!decisionListing?.id || !trimmed) return;
+    if (!decisionListing?.id || !trimmed || noteSaving) return;
 
     const request = editingNote?.id && !editingNote.isLegacy
       ? updateDecisionBoardNote(decisionListing.id, editingNote.id, { noteText: trimmed })
       : addDecisionBoardNote(decisionListing.id, { noteText: trimmed });
 
-    setSaving(true);
+    setNoteSaving(true);
     request
       .then((note) => {
         setDecisionListing((current) => {
@@ -364,7 +525,7 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       .catch((error) => {
         Alert.alert('Note not saved', error?.response?.data?.error || error?.message || 'Could not save this note.');
       })
-      .finally(() => setSaving(false));
+      .finally(() => setNoteSaving(false));
   };
 
   const editNote = (note) => {
@@ -373,8 +534,9 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
   };
 
   const removeNote = async (note) => {
-    if (!decisionListing?.id || !note?.id || note.isLegacy) return;
+    if (!decisionListing?.id || !note?.id || note.isLegacy || deletingNoteId) return;
 
+    setDeletingNoteId(note.id);
     setDecisionListing((current) => ({
       ...current,
       listingNotes: (current?.listingNotes || []).filter((item) => String(item.id) !== String(note.id)),
@@ -388,6 +550,8 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       }
     } catch (error) {
       Alert.alert('Note delete failed', error?.response?.data?.error || error?.message || 'Could not delete this note.');
+    } finally {
+      setDeletingNoteId(null);
     }
   };
 
@@ -525,9 +689,9 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
 
   const addTask = async () => {
     const trimmed = taskName.trim();
-    if (!decisionListing?.id || !trimmed) return;
+    if (!decisionListing?.id || !trimmed || taskAdding) return;
 
-    setSaving(true);
+    setTaskAdding(true);
     try {
       const task = await addDecisionBoardTask(decisionListing.id, {
         taskName: trimmed,
@@ -539,13 +703,14 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
     } catch (error) {
       Alert.alert('Task not added', error?.response?.data?.error || error?.message || 'Could not add this task.');
     } finally {
-      setSaving(false);
+      setTaskAdding(false);
     }
   };
 
   const toggleTask = async (task) => {
-    if (!decisionListing?.id || !task?.id) return;
+    if (!decisionListing?.id || !task?.id || updatingTaskId) return;
 
+    setUpdatingTaskId(task.id);
     const nextStatus = getTaskDone(task) ? 'pending' : 'completed';
     const completedAt = nextStatus === 'completed' ? new Date().toISOString() : null;
     setDecisionListing((current) => ({
@@ -557,12 +722,15 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       await updateDecisionBoardTask(decisionListing.id, task.id, { status: nextStatus, completedAt });
     } catch (error) {
       Alert.alert('Task update failed', error?.response?.data?.error || error?.message || 'Could not update this task.');
+    } finally {
+      setUpdatingTaskId(null);
     }
   };
 
   const removeTask = async (task) => {
-    if (!decisionListing?.id || !task?.id) return;
+    if (!decisionListing?.id || !task?.id || deletingTaskId) return;
 
+    setDeletingTaskId(task.id);
     setDecisionListing((current) => ({
       ...current,
       tasks: (current?.tasks || []).filter((item) => item.id !== task.id),
@@ -572,14 +740,16 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       await deleteDecisionBoardTask(decisionListing.id, task.id);
     } catch (error) {
       Alert.alert('Task delete failed', error?.response?.data?.error || error?.message || 'Could not delete this task.');
+    } finally {
+      setDeletingTaskId(null);
     }
   };
 
   const addTimelineNote = async () => {
     const trimmed = timelineNote.trim();
-    if (!decisionListing?.id || !trimmed) return;
+    if (!decisionListing?.id || !trimmed || timelineAdding) return;
 
-    setSaving(true);
+    setTimelineAdding(true);
     try {
       const event = await addDecisionBoardTimelineEvent(decisionListing.id, {
         stageName: decisionListing.listingStatus || 'Active',
@@ -592,7 +762,116 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
     } catch (error) {
       Alert.alert('Timeline not updated', error?.response?.data?.error || error?.message || 'Could not add this timeline note.');
     } finally {
-      setSaving(false);
+      setTimelineAdding(false);
+    }
+  };
+
+  const addMedia = async (mediaType) => {
+    if (!decisionListing?.id || mediaUploading) return;
+
+    const pickerOption = MEDIA_PICKER_OPTIONS[mediaType] || MEDIA_PICKER_OPTIONS.Document;
+    setMediaUploading(mediaType);
+
+    try {
+      let DocumentPicker;
+      try {
+        DocumentPicker = require('expo-document-picker');
+      } catch {
+        throw new Error('File uploads need an iOS rebuild before they can be used. Run pod install, then rebuild the app from Xcode.');
+      }
+
+      const result = await DocumentPicker.getDocumentAsync({
+        type: pickerOption.mimeTypes,
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        throw new Error('No file was selected.');
+      }
+
+      const fileResponse = await fetch(asset.uri);
+      const fileBlob = await fileResponse.blob();
+      const fileName = asset.name || `${mediaType.toLowerCase()}-attachment`;
+      const mimeType = asset.mimeType || fileBlob.type || 'application/octet-stream';
+      const fileSizeBytes = asset.size || fileBlob.size;
+
+      if (!fileSizeBytes) {
+        throw new Error('Could not determine the selected file size.');
+      }
+
+      const upload = await createDecisionBoardMediaUploadUrl(decisionListing.id, {
+        mediaType,
+        fileName,
+        mimeType,
+        fileSizeBytes,
+      });
+
+      const uploadResponse = await fetch(upload.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': upload.contentType || mimeType,
+        },
+        body: fileBlob,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('The file could not be uploaded to storage.');
+      }
+
+      const mediaItem = await addDecisionBoardMedia(decisionListing.id, {
+        mediaType,
+        fileUrl: upload.fileUrl,
+        caption: fileName || pickerOption.label,
+        isPublic: false,
+        storageProvider: upload.storageProvider,
+        storageBucket: upload.storageBucket,
+        storageKey: upload.storageKey,
+        originalFileName: fileName,
+        mimeType,
+        fileSizeBytes,
+      });
+
+      setDecisionListing((current) => ({
+        ...current,
+        media: [mediaItem, ...(current?.media || [])],
+      }));
+    } catch (error) {
+      Alert.alert('Upload failed', error?.response?.data?.error || error?.message || 'Could not attach this file.');
+    } finally {
+      setMediaUploading(null);
+    }
+  };
+
+  const openMedia = async (item) => {
+    if (!item?.fileUrl) return;
+    try {
+      const openUrl = item.id
+        ? await getDecisionBoardMediaOpenUrl(decisionListing.id, item.id)
+        : item.fileUrl;
+
+      if (isImageMedia(item)) {
+        const imageIndex = Math.max(0, imageMediaItems.findIndex((imageItem) => String(imageItem.id) === String(item.id)));
+        setMediaPreviewUrls((current) => ({ ...current, [String(item.id)]: openUrl || item.fileUrl }));
+        setImageViewerState({ visible: true, imageIndex });
+        return;
+      }
+
+      if (isVideoMedia(item)) {
+        setMediaPreviewUrls((current) => ({ ...current, [String(item.id)]: openUrl || item.fileUrl }));
+        setVideoViewer({
+          title: item.caption || item.originalFileName || 'Video',
+          url: openUrl || item.fileUrl,
+        });
+        return;
+      }
+
+      await Linking.openURL(openUrl || item.fileUrl);
+    } catch {
+      Alert.alert('Cannot open file', 'This attachment could not be opened on this device.');
     }
   };
 
@@ -609,7 +888,16 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity style={styles.heroCard} activeOpacity={0.9} onPress={() => navigation.navigate('ListingDetail', { listing })}>
+        <TouchableOpacity
+          style={styles.heroCard}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('ListingDetail', {
+            listing,
+            source: 'decisionBoard',
+            decisionBoardId: board?.id,
+            decisionBoardListingId: decisionListing?.id,
+          })}
+        >
           {imageUrl ? (
             <Image source={{ uri: imageUrl }} style={styles.heroImage} />
           ) : (
@@ -627,6 +915,13 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
             {loadingListing ? <Text style={styles.loadingHint}>Loading full property details...</Text> : null}
           </View>
         </TouchableOpacity>
+
+        {!isInBuyerWorkspace ? (
+          <TouchableOpacity style={styles.moveToBuyButton} activeOpacity={0.86} onPress={moveToBuy}>
+            <Ionicons name="home-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.moveToBuyButtonText}>Move to Buy</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Status</Text>
@@ -729,8 +1024,12 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
                       <Text style={styles.noteActionText}>Edit</Text>
                     </TouchableOpacity>
                     {!note.isLegacy ? (
-                      <TouchableOpacity onPress={() => removeNote(note)} style={styles.noteActionButton}>
-                        <Text style={[styles.noteActionText, styles.noteDeleteText]}>Delete</Text>
+                      <TouchableOpacity onPress={() => removeNote(note)} style={styles.noteActionButton} disabled={deletingNoteId === note.id}>
+                        {deletingNoteId === note.id ? (
+                          <ActivityIndicator size="small" color="#DC2626" />
+                        ) : (
+                          <Text style={[styles.noteActionText, styles.noteDeleteText]}>Delete</Text>
+                        )}
                       </TouchableOpacity>
                     ) : null}
                   </View>
@@ -750,13 +1049,23 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
             textAlignVertical="top"
           />
           {editingNote ? (
-            <TouchableOpacity style={styles.secondaryInlineButton} onPress={cancelNoteEdit} disabled={saving}>
+            <TouchableOpacity style={styles.secondaryInlineButton} onPress={cancelNoteEdit} disabled={saving || noteSaving}>
               <Text style={styles.secondaryInlineButtonText}>Cancel edit</Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity style={styles.inlineButton} onPress={saveNotes} disabled={saving || !notesDraft.trim()}>
-            <Ionicons name="save-outline" size={17} color="#FFFFFF" />
-            <Text style={styles.inlineButtonText}>{editingNote ? 'Update note' : 'Save note'}</Text>
+          <TouchableOpacity
+            style={[styles.inlineButton, noteSaving && styles.inlineButtonDisabled]}
+            onPress={saveNotes}
+            disabled={saving || noteSaving || !notesDraft.trim()}
+          >
+            {noteSaving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="save-outline" size={17} color="#FFFFFF" />
+            )}
+            <Text style={styles.inlineButtonText}>
+              {noteSaving ? (editingNote ? 'Updating' : 'Saving') : (editingNote ? 'Update note' : 'Save note')}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -767,21 +1076,29 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
           </View>
           <View style={styles.inputRow}>
             <TextInput style={styles.rowInput} value={taskName} onChangeText={setTaskName} placeholder="Add task" placeholderTextColor="#94A3B8" />
-            <TouchableOpacity style={styles.squareButton} onPress={addTask} disabled={saving || !taskName.trim()}>
-              <Ionicons name="add" size={22} color="#FFFFFF" />
+            <TouchableOpacity style={[styles.squareButton, taskAdding && styles.squareButtonDisabled]} onPress={addTask} disabled={saving || taskAdding || !taskName.trim()}>
+              {taskAdding ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="add" size={22} color="#FFFFFF" />}
             </TouchableOpacity>
           </View>
           {tasks.map((task) => (
             <View key={task.id || task.taskName} style={styles.taskRow}>
-              <TouchableOpacity style={styles.taskCheck} onPress={() => toggleTask(task)}>
-                <Ionicons name={getTaskDone(task) ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={getTaskDone(task) ? '#22C55E' : '#94A3B8'} />
+              <TouchableOpacity style={styles.taskCheck} onPress={() => toggleTask(task)} disabled={updatingTaskId === task.id}>
+                {updatingTaskId === task.id ? (
+                  <ActivityIndicator size="small" color={APP_PURPLE} />
+                ) : (
+                  <Ionicons name={getTaskDone(task) ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={getTaskDone(task) ? '#22C55E' : '#94A3B8'} />
+                )}
               </TouchableOpacity>
               <View style={styles.taskBody}>
                 <Text style={[styles.taskName, getTaskDone(task) && styles.taskDone]}>{task.taskName}</Text>
                 <Text style={styles.taskMeta}>{task.taskType || 'general'} / {task.status || 'pending'}</Text>
               </View>
-              <TouchableOpacity style={styles.deleteButton} onPress={() => removeTask(task)}>
-                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              <TouchableOpacity style={styles.deleteButton} onPress={() => removeTask(task)} disabled={deletingTaskId === task.id}>
+                {deletingTaskId === task.id ? (
+                  <ActivityIndicator size="small" color="#EF4444" />
+                ) : (
+                  <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                )}
               </TouchableOpacity>
             </View>
           ))}
@@ -791,8 +1108,8 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
           <Text style={styles.sectionTitle}>Timeline</Text>
           <View style={styles.inputRow}>
             <TextInput style={styles.rowInput} value={timelineNote} onChangeText={setTimelineNote} placeholder="Add progress note" placeholderTextColor="#94A3B8" />
-            <TouchableOpacity style={styles.squareButton} onPress={addTimelineNote} disabled={saving || !timelineNote.trim()}>
-              <Ionicons name="add" size={22} color="#FFFFFF" />
+            <TouchableOpacity style={[styles.squareButton, timelineAdding && styles.squareButtonDisabled]} onPress={addTimelineNote} disabled={saving || timelineAdding || !timelineNote.trim()}>
+              {timelineAdding ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="add" size={22} color="#FFFFFF" />}
             </TouchableOpacity>
           </View>
           {timeline.map((event) => (
@@ -809,19 +1126,87 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Media & documents</Text>
+          <View style={styles.mediaActions}>
+            {Object.entries(MEDIA_PICKER_OPTIONS).map(([mediaType, option]) => {
+              const uploading = mediaUploading === mediaType;
+              return (
+                <TouchableOpacity
+                  key={mediaType}
+                  style={[styles.mediaActionButton, uploading && styles.mediaActionButtonDisabled]}
+                  onPress={() => addMedia(mediaType)}
+                  disabled={Boolean(mediaUploading)}
+                >
+                  {uploading ? (
+                    <ActivityIndicator size="small" color={APP_PURPLE} />
+                  ) : (
+                    <Ionicons name={option.icon} size={17} color={APP_PURPLE} />
+                  )}
+                  <Text style={styles.mediaActionText}>{uploading ? 'Adding' : option.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           {media.length ? media.map((item) => (
-            <View key={item.id || item.fileUrl} style={styles.mediaRow}>
-              <Ionicons name="document-text-outline" size={20} color={APP_PURPLE} />
+            <TouchableOpacity key={item.id || item.fileUrl} style={styles.mediaRow} onPress={() => openMedia(item)} activeOpacity={0.82}>
+              <View style={styles.mediaThumb}>
+                {isImageMedia(item) && mediaPreviewUrls[String(item.id)] ? (
+                  <Image source={{ uri: mediaPreviewUrls[String(item.id)] }} style={styles.mediaThumbImage} />
+                ) : isVideoMedia(item) && mediaPreviewUrls[String(item.id)] ? (
+                  <View style={styles.videoThumb} pointerEvents="none">
+                    <WebView
+                      source={{ html: createVideoHtml(mediaPreviewUrls[String(item.id)]) }}
+                      scrollEnabled={false}
+                      allowsInlineMediaPlayback
+                      mediaPlaybackRequiresUserAction
+                      style={styles.videoThumbWebView}
+                    />
+                    <View style={styles.videoPlayOverlay}>
+                      <Ionicons name="play" size={14} color="#FFFFFF" />
+                    </View>
+                  </View>
+                ) : (
+                  <Ionicons name={getMediaIcon(item.mediaType)} size={22} color={APP_PURPLE} />
+                )}
+              </View>
               <View style={styles.mediaBody}>
                 <Text style={styles.mediaTitle}>{item.caption || item.mediaType || 'Media item'}</Text>
                 <Text style={styles.mediaMeta}>{item.isPublic ? 'Public' : 'Private'} / {item.mediaType || 'Media'}</Text>
               </View>
-            </View>
+              <Ionicons name="open-outline" size={17} color="#94A3B8" />
+            </TouchableOpacity>
           )) : (
             <Text style={styles.emptyInline}>Photos, videos, audio and documents will appear here.</Text>
           )}
         </View>
       </ScrollView>
+      <ImageView
+        images={imageViewerImages}
+        imageIndex={Math.min(imageViewerState.imageIndex, Math.max(imageViewerImages.length - 1, 0))}
+        visible={imageViewerState.visible && imageViewerImages.length > 0}
+        onRequestClose={() => setImageViewerState({ visible: false, imageIndex: 0 })}
+      />
+      <Modal
+        visible={Boolean(videoViewer?.url)}
+        animationType="slide"
+        onRequestClose={() => setVideoViewer(null)}
+      >
+        <View style={styles.videoModal}>
+          <View style={styles.videoModalHeader}>
+            <Text style={styles.videoModalTitle} numberOfLines={1}>{videoViewer?.title || 'Video'}</Text>
+            <TouchableOpacity style={styles.videoCloseButton} onPress={() => setVideoViewer(null)}>
+              <Ionicons name="close" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          {videoViewer?.url ? (
+            <WebView
+              source={{ html: createVideoHtml(videoViewer.url, { autoplay: true }) }}
+              allowsInlineMediaPlayback
+              mediaPlaybackRequiresUserAction={false}
+              style={styles.videoPlayer}
+            />
+          ) : null}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -844,6 +1229,8 @@ const styles = StyleSheet.create({
   heroPrice: { color: APP_PURPLE, fontSize: 20, fontWeight: '900', marginTop: 8 },
   heroTitle: { color: '#111827', fontSize: 16, fontWeight: '900', lineHeight: 22, marginTop: 5 },
   loadingHint: { color: '#94A3B8', fontSize: 12, fontWeight: '800', marginTop: 8 },
+  moveToBuyButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, flexDirection: 'row', justifyContent: 'center', marginBottom: 14, minHeight: 44 },
+  moveToBuyButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', marginLeft: 8 },
   section: { backgroundColor: '#FFFFFF', borderRadius: 8, marginBottom: 14, padding: 14 },
   sectionHeaderRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   sectionTitle: { color: '#111827', fontSize: 15, fontWeight: '900' },
@@ -874,12 +1261,14 @@ const styles = StyleSheet.create({
   noteText: { color: '#334155', fontSize: 13, fontWeight: '700', lineHeight: 19 },
   notesInput: { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0', borderRadius: 8, borderWidth: 1, color: '#111827', fontSize: 14, lineHeight: 20, marginTop: 12, minHeight: 112, padding: 12 },
   inlineButton: { alignItems: 'center', alignSelf: 'flex-start', backgroundColor: APP_PURPLE, borderRadius: 8, flexDirection: 'row', marginTop: 10, minHeight: 40, paddingHorizontal: 13 },
+  inlineButtonDisabled: { opacity: 0.72 },
   inlineButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', marginLeft: 6 },
   secondaryInlineButton: { alignSelf: 'flex-start', marginTop: 10, paddingVertical: 6 },
   secondaryInlineButtonText: { color: '#64748B', fontSize: 13, fontWeight: '900' },
   inputRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   rowInput: { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0', borderRadius: 8, borderWidth: 1, color: '#111827', flex: 1, fontSize: 14, minHeight: 42, paddingHorizontal: 11 },
   squareButton: { alignItems: 'center', backgroundColor: APP_PURPLE, borderRadius: 8, height: 42, justifyContent: 'center', width: 42 },
+  squareButtonDisabled: { opacity: 0.72 },
   taskRow: { alignItems: 'center', borderTopColor: '#E5E7EB', borderTopWidth: 1, flexDirection: 'row', marginTop: 10, paddingTop: 10 },
   taskCheck: { height: 38, justifyContent: 'center', width: 34 },
   taskBody: { flex: 1 },
@@ -893,8 +1282,22 @@ const styles = StyleSheet.create({
   timelineStage: { color: '#111827', fontSize: 14, fontWeight: '900' },
   timelineNotes: { color: '#475569', fontSize: 13, lineHeight: 19, marginTop: 4 },
   timelineDate: { color: '#94A3B8', fontSize: 11, fontWeight: '800', marginTop: 5 },
+  mediaActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  mediaActionButton: { alignItems: 'center', backgroundColor: '#EEF2FF', borderColor: '#C7D2FE', borderRadius: 8, borderWidth: 1, flexDirection: 'row', minHeight: 38, paddingHorizontal: 10 },
+  mediaActionButtonDisabled: { opacity: 0.65 },
+  mediaActionText: { color: APP_PURPLE, fontSize: 12, fontWeight: '900', marginLeft: 6 },
   mediaRow: { alignItems: 'center', borderTopColor: '#E5E7EB', borderTopWidth: 1, flexDirection: 'row', marginTop: 10, paddingTop: 10 },
+  mediaThumb: { alignItems: 'center', backgroundColor: '#EEF2FF', borderRadius: 8, height: 54, justifyContent: 'center', overflow: 'hidden', width: 68 },
+  mediaThumbImage: { height: '100%', width: '100%' },
+  videoThumb: { backgroundColor: '#020617', height: '100%', width: '100%' },
+  videoThumbWebView: { backgroundColor: '#020617', height: '100%', opacity: 0.82, width: '100%' },
+  videoPlayOverlay: { alignItems: 'center', backgroundColor: 'rgba(15, 23, 42, 0.76)', borderRadius: 999, height: 28, justifyContent: 'center', left: 20, position: 'absolute', top: 13, width: 28 },
   mediaBody: { flex: 1, marginLeft: 10 },
   mediaTitle: { color: '#111827', fontSize: 14, fontWeight: '800' },
   mediaMeta: { color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 3 },
+  videoModal: { backgroundColor: '#000000', flex: 1 },
+  videoModalHeader: { alignItems: 'center', backgroundColor: '#020617', flexDirection: 'row', minHeight: 58, paddingHorizontal: 14, paddingTop: 8 },
+  videoModalTitle: { color: '#FFFFFF', flex: 1, fontSize: 15, fontWeight: '900' },
+  videoCloseButton: { alignItems: 'center', height: 42, justifyContent: 'center', width: 42 },
+  videoPlayer: { backgroundColor: '#000000', flex: 1 },
 });

@@ -30,10 +30,12 @@ import {
 
 const APP_PURPLE = '#6366F1';
 const FLOW_STEPS = [
-  { key: 'deck', label: 'Property Deck' },
+  { key: 'detail', label: 'Property Deck' },
   { key: 'shortlist', label: 'Shortlist' },
   { key: 'decision', label: 'Decision' },
+  { key: 'buy', label: 'Buy' },
 ];
+const ACTIVE_FLOW_STEP = 'decision';
 
 const TRAFFIC_LIGHT = {
   Green: { color: '#22C55E', label: 'Active' },
@@ -185,6 +187,7 @@ const getCompareProsCons = (ranking, item) => {
 
   const lightKey = item?.trafficLightStatus || statusToTrafficLight(item?.listingStatus);
   if (lightKey === 'Green') pros.push('Active decision option');
+  if (lightKey === 'Red' || item?.listingStatus === 'Closed') cons.push('Closed decision option');
   if (item?.viewingStatus && item.viewingStatus !== 'Not arranged') pros.push(item.viewingStatus);
 
   return {
@@ -221,6 +224,8 @@ export default function DecisionBoardScreen({ route, navigation }) {
   const contactModalTitle = contactModal.type === 'agent'
     ? `${contactModal.item ? 'Edit' : 'Add'} agent`
     : `${contactModal.item ? 'Edit' : 'Add'} broker`;
+  const activeFlowIndex = FLOW_STEPS.findIndex((step) => step.key === ACTIVE_FLOW_STEP);
+  const boardPropertyDeckId = board?.propertyDeckId || board?.PropertyDeckID || board?.PropertyDeckId || route.params?.propertyDeckId || null;
 
   const loadBoard = useCallback(async () => {
     if (!decisionBoardId) return;
@@ -248,7 +253,14 @@ export default function DecisionBoardScreen({ route, navigation }) {
 
     setSaving(true);
     try {
-      setBoard(await updateDecisionBoard(board.id, { status }));
+      const updated = await updateDecisionBoard(board.id, { status });
+      setBoard((current) => ({
+        ...current,
+        ...updated,
+        listings: updated?.listings?.length ? updated.listings : current?.listings || [],
+        agents: updated?.agents?.length ? updated.agents : current?.agents || [],
+        brokers: updated?.brokers?.length ? updated.brokers : current?.brokers || [],
+      }));
     } catch (error) {
       Alert.alert('Status update failed', error?.response?.data?.error || error?.message || 'Could not update board status.');
     } finally {
@@ -430,14 +442,41 @@ export default function DecisionBoardScreen({ route, navigation }) {
     ]);
   };
 
+  const handleFlowStepPress = (stepKey) => {
+    if (stepKey === ACTIVE_FLOW_STEP) return;
+
+    if (stepKey === 'buy') {
+      navigation.navigate('Tabs', { screen: 'Buy' });
+      return;
+    }
+
+    const params = { openMode: stepKey };
+    if (boardPropertyDeckId) {
+      params.openDeckId = boardPropertyDeckId;
+    }
+
+    navigation.navigate('Tabs', {
+      screen: 'Deck',
+      params,
+    });
+  };
+
   const renderFlowSteps = () => (
     <View style={styles.flowStepsContainer}>
       {FLOW_STEPS.map((step, index) => {
-        const isActive = index === FLOW_STEPS.length - 1;
-        const isComplete = index < FLOW_STEPS.length - 1;
+        const isActive = step.key === ACTIVE_FLOW_STEP;
+        const isComplete = index < activeFlowIndex;
+        const isLineComplete = index < activeFlowIndex;
 
         return (
-          <View key={step.key} style={styles.flowStepItem}>
+          <TouchableOpacity
+            key={step.key}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            onPress={() => handleFlowStepPress(step.key)}
+            style={styles.flowStepItem}
+          >
             <View style={styles.flowStepTopRow}>
               <View style={[
                 styles.flowStepDot,
@@ -453,13 +492,13 @@ export default function DecisionBoardScreen({ route, navigation }) {
                 )}
               </View>
               {index < FLOW_STEPS.length - 1 && (
-                <View style={[styles.flowStepLine, isComplete && styles.flowStepLineActive]} />
+                <View style={[styles.flowStepLine, isLineComplete && styles.flowStepLineActive]} />
               )}
             </View>
             <Text style={[styles.flowStepLabel, isActive && styles.flowStepLabelActive]} numberOfLines={1}>
               {step.label}
             </Text>
-          </View>
+          </TouchableOpacity>
         );
       })}
     </View>

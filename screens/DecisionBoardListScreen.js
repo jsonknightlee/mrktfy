@@ -303,36 +303,37 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     const isAdding = savingBoardId === item.id;
 
     return (
-      <TouchableOpacity
-        style={styles.boardCard}
-        activeOpacity={0.9}
-        onPress={() => navigation.navigate('DecisionBoard', { decisionBoardId: item.id, decisionBoard: item })}
-      >
+      <View style={styles.boardCard}>
         <View style={[styles.lightRail, { backgroundColor: light.color }]} />
         <View style={styles.boardCardBody}>
-          <View style={styles.boardTopRow}>
-            <View style={styles.boardIcon}>
-              <Ionicons name="flag-outline" size={22} color={APP_PURPLE} />
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('DecisionBoard', { decisionBoardId: item.id, decisionBoard: item })}
+          >
+            <View style={styles.boardTopRow}>
+              <View style={styles.boardIcon}>
+                <Ionicons name="flag-outline" size={22} color={APP_PURPLE} />
+              </View>
+              <View style={styles.boardText}>
+                <Text style={styles.boardName}>{item.boardName}</Text>
+                <Text style={styles.boardMeta}>{item.boardType} / {light.label}</Text>
+              </View>
+              <Text style={styles.boardCount}>{activeCount}/{item.maxProperties}</Text>
             </View>
-            <View style={styles.boardText}>
-              <Text style={styles.boardName}>{item.boardName}</Text>
-              <Text style={styles.boardMeta}>{item.boardType} / {light.label}</Text>
+            <View style={styles.propertyPreviewRow}>
+              {(item.listings || []).slice(0, 4).map((boardListing, index) => {
+                const listing = getBoardListingPreviewWithCache(boardListing, listingPreviewCacheRef.current);
+                const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
+                return imageUrl ? (
+                  <Image key={boardListing.id || `${item.id}-${index}`} source={{ uri: imageUrl }} style={styles.previewThumb} />
+                ) : (
+                  <View key={boardListing.id || `${item.id}-${index}`} style={[styles.previewThumb, styles.previewThumbEmpty]}>
+                    <Ionicons name="home-outline" size={15} color="#CBD5E1" />
+                  </View>
+                );
+              })}
             </View>
-            <Text style={styles.boardCount}>{activeCount}/{item.maxProperties}</Text>
-          </View>
-          <View style={styles.propertyPreviewRow}>
-            {(item.listings || []).slice(0, 4).map((boardListing, index) => {
-              const listing = getBoardListingPreviewWithCache(boardListing, listingPreviewCacheRef.current);
-              const imageUrl = normalizeImageUrls(getListingImageValue(listing))[0];
-              return imageUrl ? (
-                <Image key={boardListing.id || `${item.id}-${index}`} source={{ uri: imageUrl }} style={styles.previewThumb} />
-              ) : (
-                <View key={boardListing.id || `${item.id}-${index}`} style={[styles.previewThumb, styles.previewThumbEmpty]}>
-                  <Ionicons name="home-outline" size={15} color="#CBD5E1" />
-                </View>
-              );
-            })}
-          </View>
+          </TouchableOpacity>
           {pendingListing ? (
             <TouchableOpacity
               style={[styles.addToBoardButton, isAdding && styles.disabledButton]}
@@ -346,7 +347,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
             </TouchableOpacity>
           ) : null}
         </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 
