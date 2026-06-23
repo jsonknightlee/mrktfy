@@ -11,7 +11,7 @@ const getSubscriptionPrice = (tierId) => {
   const prices = {
     'free': 0,
     'prospector': 9.99,
-    'investor': 19.99,
+    'investor': 29.99,
     'developer': 49.99
   };
   return prices[tierId] || 0;

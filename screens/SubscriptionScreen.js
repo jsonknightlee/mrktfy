@@ -191,18 +191,43 @@ export default function SubscriptionScreen({ navigation }) {
     userProfile?.cancelledAt ??
     false
   );
+  const isAnySubscriptionActionProcessing = isCancelling || isReactivating;
+
+  const getPlanCTA = (plan) => {
+    const planKey = String(plan.key || '').toLowerCase();
+    const isCurrentPlan = planKey === normalizedCurrentTier;
+
+    if (!plan.isAvailable) {
+      return { type: 'coming_soon', label: 'Coming soon' };
+    }
+
+    if (isCurrentPlan) {
+      if (planKey === 'free') {
+        return { type: 'current_plan', label: 'Current plan' };
+      }
+
+      return isSubscriptionCancelled
+        ? { type: 'reactivate', label: 'Reactivate subscription' }
+        : { type: 'cancel', label: 'Cancel subscription' };
+    }
+
+    if (planKey === 'free') {
+      return isSubscriptionCancelled
+        ? { type: 'pending_free', label: 'Free after current period' }
+        : { type: 'cancel_to_free', label: 'Cancel to Free' };
+    }
+
+    if (plan.trial?.enabled) {
+      return { type: 'trial', label: `Start ${plan.trial.durationDays}-day trial` };
+    }
+
+    return { type: 'subscribe', label: `Subscribe to ${plan.name}` };
+  };
 
   // Update plan CTAs based on actual current tier
   const plansWithCTA = planConfig.plans.map(plan => ({
     ...plan,
-    cta: {
-      type: String(plan.key).toLowerCase() === normalizedCurrentTier ? 'current_plan' : 'subscribe',
-      label: String(plan.key).toLowerCase() === normalizedCurrentTier
-        ? String(plan.key).toLowerCase() === 'free'
-          ? 'Current plan'
-          : isSubscriptionCancelled ? 'Reactivate subscription' : 'Cancel subscription'
-        : plan.trial?.enabled ? 'Start trial' : 'Subscribe'
-    }
+    cta: getPlanCTA(plan)
   }));
 
   const handleTierSelect = (tier) => {
@@ -231,8 +256,17 @@ export default function SubscriptionScreen({ navigation }) {
       return;
     }
 
-    // Handle Free plan - no payment needed
     if (tier.key === 'free') {
+      if (normalizedCurrentTier !== 'free') {
+        if (isSubscriptionCancelled) {
+          Alert.alert('Already scheduled', 'Your paid subscription is already set to end at the current billing period.');
+          return;
+        }
+
+        handleCancelSubscription({ ...tier, name: 'paid plan' });
+        return;
+      }
+
       Alert.alert(
         'Free Plan',
         'You\'re already on the Free plan! Enjoy basic property search with ads.',
@@ -332,8 +366,9 @@ export default function SubscriptionScreen({ navigation }) {
     const isCurrentFreePlan = isCurrentPlan && normalizedCurrentTier === 'free';
     const isCurrentPaidPlan = isCurrentPlan && normalizedCurrentTier !== 'free';
     const isCancelledCurrentPlan = isCurrentPaidPlan && isSubscriptionCancelled;
-    const isProcessingCurrentPlan = isCurrentPaidPlan && (isCancelling || isReactivating);
-    const isDisabled = isComingSoon || isCurrentFreePlan || isProcessingCurrentPlan;
+    const isPendingFreePlan = tier.cta?.type === 'pending_free';
+    const isProcessingCurrentPlan = isCurrentPaidPlan && isAnySubscriptionActionProcessing;
+    const isDisabled = isComingSoon || isCurrentFreePlan || isPendingFreePlan || isProcessingCurrentPlan || (!isCurrentPaidPlan && isAnySubscriptionActionProcessing);
     
     return (
       <View
@@ -393,7 +428,7 @@ export default function SubscriptionScreen({ navigation }) {
         {/* Features */}
         <View style={styles.featuresContainer}>
           {tier.features.map((feature, index) => (
-            <Text key={`feature-${tier.id}-${index}`} style={[styles.feature, { color: isComingSoon ? '#999' : '#333' }]}>
+            <Text key={`feature-${tier.key}-${index}`} style={[styles.feature, { color: isComingSoon ? '#999' : '#333' }]}>
               {feature}
             </Text>
           ))}
