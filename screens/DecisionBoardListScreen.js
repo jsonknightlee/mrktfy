@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import {
   addDecisionBoardListing,
   BOARD_LIMITS,
@@ -24,6 +25,17 @@ import {
 import { getListingById } from '../services/listingApi';
 
 const APP_PURPLE = '#6366F1';
+const DECISION_BOARD_COUNT_LIMITS = {
+  free: 0,
+  prospector: 1,
+  investor: 5,
+  developer: 10,
+};
+
+const getDecisionBoardCountLimit = (tier) => {
+  const normalizedTier = String(tier || 'free').toLowerCase();
+  return DECISION_BOARD_COUNT_LIMITS[normalizedTier] ?? 0;
+};
 
 const normalizeImageUrls = (value) => {
   if (!value) return [];
@@ -124,6 +136,7 @@ const getBoardLight = (board) => {
 
 export default function DecisionBoardListScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { currentTier } = useSubscription();
   const listingPreviewCacheRef = useRef(new Map());
   const pendingListing = route.params?.pendingListing || null;
   const pendingSource = route.params?.pendingSource || {};
@@ -133,6 +146,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [boardName, setBoardName] = useState('');
   const [boardType, setBoardType] = useState('Buyer');
+  const boardCountLimit = getDecisionBoardCountLimit(currentTier);
 
   const pendingImageUrl = useMemo(
     () => normalizeImageUrls(pendingListing?.ImageUrls || pendingListing?.imageUrls || pendingListing?.imageUrl)[0],
@@ -258,9 +272,44 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     }
   };
 
+  const openCreateBoard = () => {
+    if (boardCountLimit <= 0) {
+      Alert.alert(
+        'Decision Board is a Buyer feature',
+        'Upgrade to Buyer to create a Decision Board.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
+        ]
+      );
+      return;
+    }
+
+    if (boards.length >= boardCountLimit) {
+      Alert.alert(
+        'Decision Board limit reached',
+        boardCountLimit === 1
+          ? 'Buyer includes 1 Decision Board. Delete or close an existing board, or upgrade to Investor.'
+          : `Your plan includes ${boardCountLimit} Decision Boards.`,
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
+        ]
+      );
+      return;
+    }
+
+    setCreateModalVisible(true);
+  };
+
   const createBoard = async () => {
     const trimmedName = boardName.trim();
     if (!trimmedName) return;
+
+    if (boardCountLimit <= 0 || boards.length >= boardCountLimit) {
+      openCreateBoard();
+      return;
+    }
 
     setSavingBoardId('new');
     try {
@@ -363,7 +412,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
           <Text style={styles.headerTitle}>Decision Boards</Text>
           <Text style={styles.headerSubtitle}>Active property acquisition projects</Text>
         </View>
-        <TouchableOpacity style={styles.createButton} onPress={() => setCreateModalVisible(true)}>
+        <TouchableOpacity style={styles.createButton} onPress={openCreateBoard}>
           <Ionicons name="add" size={22} color="#FFFFFF" />
         </TouchableOpacity>
       </View>

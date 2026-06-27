@@ -1681,7 +1681,7 @@ export default function PropertyDeckScreen({ route }) {
           <Ionicons name="lock-closed-outline" size={44} color="#C7CDD8" />
           <Text style={styles.emptyTitle}>Property Decks are a paid feature</Text>
           <Text style={styles.emptyText}>
-            Prospector includes 1 deck, Investor includes 5, and Developer includes 10.
+            Buyer includes 1 deck, Investor includes 5, and Developer includes 10.
           </Text>
         </View>
       ) : (

@@ -3,6 +3,18 @@ import { api } from './api';
 
 const BUYER_WORKSPACE_ITEMS_KEY = 'mrktfy_buyer_workspace_items';
 
+export const BUYER_WORKSPACE_LIMITS = {
+  free: 0,
+  prospector: 1,
+  investor: 5,
+  developer: 10,
+};
+
+export const getBuyerWorkspaceLimit = (tier) => {
+  const normalizedTier = String(tier || 'free').toLowerCase();
+  return BUYER_WORKSPACE_LIMITS[normalizedTier] ?? 0;
+};
+
 const readItems = async () => {
   try {
     const value = await AsyncStorage.getItem(BUYER_WORKSPACE_ITEMS_KEY);

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import {
   getBuyerWorkspaceItems,
+  getBuyerWorkspaceLimit,
   removeBuyerWorkspaceItem,
 } from '../services/BuyerWorkspaceStorageService';
 
@@ -27,15 +28,13 @@ const formatDate = (value) => {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-const isInvestorTier = (tier) => String(tier || '').toLowerCase() === 'investor';
-
 export default function BuyerWorkspaceScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { currentTier } = useSubscription();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const focusWorkspaceItemId = route?.params?.focusWorkspaceItemId || null;
-  const canAddMultiple = useMemo(() => isInvestorTier(currentTier), [currentTier]);
+  const workspaceLimit = useMemo(() => getBuyerWorkspaceLimit(currentTier), [currentTier]);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -61,13 +60,27 @@ export default function BuyerWorkspaceScreen({ route, navigation }) {
   };
 
   const addWorkspaceItem = () => {
-    if (!canAddMultiple) {
+    if (workspaceLimit <= 0) {
       Alert.alert(
-        'Investor required',
-        'Multiple Buyer Workspace items are available on the Investor plan.',
+        'Buyer Workspace is a Buyer feature',
+        'Upgrade to Buyer to move Decision Board listings into the buying journey.',
         [
           { text: 'Not now', style: 'cancel' },
           { text: 'Upgrade', onPress: () => navigation.navigate('Subscription') },
+        ]
+      );
+      return;
+    }
+
+    if (items.length >= workspaceLimit) {
+      Alert.alert(
+        'Buyer Workspace limit reached',
+        workspaceLimit === 1
+          ? 'Buyer includes 1 active Buyer Workspace property. Delete it to move another property, or upgrade to Investor.'
+          : `Your plan includes ${workspaceLimit} active Buyer Workspace properties.`,
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
         ]
       );
       return;

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Modal,
-  ScrollView, Animated, TouchableWithoutFeedback, TextInput
+  ScrollView, Animated, TouchableWithoutFeedback, TextInput, Switch
 } from 'react-native';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -38,8 +38,10 @@ const { API_BASE_URL, API_KEY} = Constants.expoConfig.extra;
 const FILTER_STORAGE_KEY = 'mrktfy-filters';
 const TYPE_STORAGE_KEY = 'mrktfy-property-type';
 const SEARCH_LOCATION_STORAGE_KEY = 'mrktfy-map-search-location';
+const SEARCH_LOCATION_HISTORY_STORAGE_KEY = 'mrktfy-map-search-location-history';
 const TOAST_DURATION_MS = 20000; // 20s
-const MAP_LISTING_LIMIT = 2000;
+const MAP_LISTING_LIMIT = 350;
+const SEARCH_LOCATION_HISTORY_LIMIT = 5;
 
 const TYPE_RENT = 'to-rent';
 const TYPE_SALE = 'for-sale';
@@ -98,7 +100,9 @@ export default function MapScreen() {
   const [searchLocation, setSearchLocation] = useState(null);
   const [searchLocationInputVisible, setSearchLocationInputVisible] = useState(false);
   const [searchLocationQuery, setSearchLocationQuery] = useState('');
+  const [searchLocationHistory, setSearchLocationHistory] = useState([]);
   const [searchingLocation, setSearchingLocation] = useState(false);
+  const [locationSearchReady, setLocationSearchReady] = useState(false);
 
   // Wheel state (we avoid re-render during scroll)
   const minIndexRef = useRef(0);
@@ -112,6 +116,7 @@ export default function MapScreen() {
   const deckBorderAnim = useRef(new Animated.Value(0)).current;
   const isInteractingWithMarker = useRef(false);
   const isDismissingRef = useRef(false);
+  const listingsRequestSeqRef = useRef(0);
 
   // Toast
   const [toastText, setToastText] = useState('');
@@ -215,6 +220,8 @@ export default function MapScreen() {
   const loadListingsForLocation = async (location, type = isRental ? TYPE_RENT : TYPE_SALE) => {
     if (!location?.latitude || !location?.longitude) return;
 
+    const requestSeq = listingsRequestSeqRef.current + 1;
+    listingsRequestSeqRef.current = requestSeq;
     setSelectedListing(null);
     setListings([]);
     setFilteredListings([]);
@@ -222,7 +229,8 @@ export default function MapScreen() {
     try {
       const searchRadius = getMaxSearchRadius();
       console.log(`🔍 Using search radius: ${searchRadius}km for ${currentTier} tier`);
-      const nearby = await fetchNearbyListings(location.latitude, location.longitude, searchRadius, type, MAP_LISTING_LIMIT);
+      const nearby = await fetchNearbyListings(location.latitude, location.longitude, searchRadius, type, MAP_LISTING_LIMIT, filters);
+      if (requestSeq !== listingsRequestSeqRef.current) return;
       setListings(nearby);
 
       if (nearby.length === 0) {
@@ -232,7 +240,8 @@ export default function MapScreen() {
       console.error('Failed to fetch listings:', err);
       try {
         const searchRadius = getMaxSearchRadius();
-        const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, type, MAP_LISTING_LIMIT);
+        const londonNearby = await fetchNearbyListings(51.5074, -0.1278, searchRadius, type, MAP_LISTING_LIMIT, filters);
+        if (requestSeq !== listingsRequestSeqRef.current) return;
         setListings(londonNearby);
         console.log('Error fallback to London, found:', londonNearby.length, 'listings');
       } catch (fallbackErr) {
@@ -241,13 +250,42 @@ export default function MapScreen() {
     }
   };
 
+  const saveSearchLocationHistory = async (location) => {
+    if (!location?.latitude || !location?.longitude) return;
+
+    const nextHistory = [
+      location,
+      ...searchLocationHistory.filter((item) => {
+        const sameQuery = item.query && location.query && item.query.toLowerCase() === location.query.toLowerCase();
+        const sameCoordinate = item.latitude === location.latitude && item.longitude === location.longitude;
+        return !sameQuery && !sameCoordinate;
+      }),
+    ].slice(0, SEARCH_LOCATION_HISTORY_LIMIT);
+
+    setSearchLocationHistory(nextHistory);
+    await AsyncStorage.setItem(SEARCH_LOCATION_HISTORY_STORAGE_KEY, JSON.stringify(nextHistory));
+  };
+
+  const selectSearchLocation = async (location) => {
+    if (!searchLocationEnabled || !location?.latitude || !location?.longitude) return;
+
+    setSelectedListing(null);
+    setSearchLocation(location);
+    setSearchLocationQuery(location.query || location.label || '');
+    setSearchLocationInputVisible(false);
+    await AsyncStorage.setItem(SEARCH_LOCATION_STORAGE_KEY, JSON.stringify(location));
+    await saveSearchLocationHistory(location);
+    await loadListingsForLocation(location, isRental ? TYPE_RENT : TYPE_SALE);
+  };
+
   // Load saved filters & type
   useEffect(() => {
     (async () => {
       try {
-        const [storedFilters, storedType] = await Promise.all([
+        const [storedFilters, storedType, storedSearchHistory] = await Promise.all([
           AsyncStorage.getItem(FILTER_STORAGE_KEY),
           AsyncStorage.getItem(TYPE_STORAGE_KEY),
+          AsyncStorage.getItem(SEARCH_LOCATION_HISTORY_STORAGE_KEY),
         ]);
         if (storedFilters) {
           const parsed = JSON.parse(storedFilters);
@@ -256,6 +294,10 @@ export default function MapScreen() {
         }
         if (storedType === TYPE_RENT || storedType === TYPE_SALE) {
           setIsRental(storedType === TYPE_RENT);
+        }
+        if (storedSearchHistory) {
+          const parsedHistory = JSON.parse(storedSearchHistory);
+          setSearchLocationHistory(Array.isArray(parsedHistory) ? parsedHistory : []);
         }
       } catch (err) {
         console.warn('Failed to load prefs:', err);
@@ -302,40 +344,48 @@ export default function MapScreen() {
   // fetch listings by type and active search location
   useEffect(() => {
     (async () => {
+      setLocationSearchReady(false);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         console.warn('Location permission denied');
+        setLocationSearchReady(true);
         return;
       }
-      const loc = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = loc.coords;
-      const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
-      setUserLocation(nextUserLocation);
 
-      let savedSearchLocation = null;
-      if (canUseSearchLocation(currentTier)) {
-        try {
-          const savedValue = await AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY);
-          savedSearchLocation = savedValue ? JSON.parse(savedValue) : null;
-        } catch {}
-      } else {
-        await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
-        setSearchLocation(null);
-        setSearchLocationInputVisible(false);
-      }
+      try {
+        const loc = await Location.getCurrentPositionAsync({});
+        const { latitude, longitude } = loc.coords;
+        const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
 
-      if (savedSearchLocation?.latitude && savedSearchLocation?.longitude) {
-        setSearchLocation(savedSearchLocation);
-        if (!searchLocationQuery) {
-          setSearchLocationQuery(savedSearchLocation.query || savedSearchLocation.label || '');
+        let savedSearchLocation = null;
+        if (canUseSearchLocation(currentTier)) {
+          try {
+            const savedValue = await AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY);
+            savedSearchLocation = savedValue ? JSON.parse(savedValue) : null;
+          } catch {}
+        } else {
+          await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
+          setSearchLocation(null);
+          setSearchLocationInputVisible(false);
         }
+
+        if (savedSearchLocation?.latitude && savedSearchLocation?.longitude) {
+          setSearchLocation(savedSearchLocation);
+          if (!searchLocationQuery) {
+            setSearchLocationQuery(savedSearchLocation.query || savedSearchLocation.label || '');
+          }
+        }
+
+        setUserLocation(nextUserLocation);
+
+        const locationForSearch = savedSearchLocation?.latitude && canUseSearchLocation(currentTier)
+          ? savedSearchLocation
+          : nextUserLocation;
+
+        await loadListingsForLocation(locationForSearch, isRental ? TYPE_RENT : TYPE_SALE);
+      } finally {
+        setLocationSearchReady(true);
       }
-
-      const locationForSearch = savedSearchLocation?.latitude && canUseSearchLocation(currentTier)
-        ? savedSearchLocation
-        : nextUserLocation;
-
-      await loadListingsForLocation(locationForSearch, isRental ? TYPE_RENT : TYPE_SALE);
     })();
   }, [isRental, currentTier]);
 
@@ -371,11 +421,7 @@ export default function MapScreen() {
         savedAt: new Date().toISOString(),
       };
 
-      setSelectedListing(null);
-      setSearchLocation(nextSearchLocation);
-      setSearchLocationInputVisible(false);
-      await AsyncStorage.setItem(SEARCH_LOCATION_STORAGE_KEY, JSON.stringify(nextSearchLocation));
-      await loadListingsForLocation(nextSearchLocation, isRental ? TYPE_RENT : TYPE_SALE);
+      await selectSearchLocation(nextSearchLocation);
     } catch (err) {
       console.error('Search location failed:', err);
       showToast('Could not search that location. Try again.');
@@ -544,7 +590,7 @@ export default function MapScreen() {
   const bedsLabel = formatMinimumRoomLabel(filters.beds);
   const bathsLabel = formatMinimumRoomLabel(filters.baths);
 
-  if (!userLocation) {
+  if (!userLocation || !locationSearchReady) {
     return (
       <View style={styles.center}>
         <Text>Loading your location...</Text>
@@ -576,45 +622,76 @@ export default function MapScreen() {
       {searchLocationEnabled && (
         <View style={styles.searchLocationPanel}>
           {searchLocationInputVisible ? (
-            <View style={styles.searchLocationInputRow}>
-              <Ionicons name="search" size={18} color="#64748B" />
-              <TextInput
-                style={styles.searchLocationInput}
-                value={searchLocationQuery}
-                onChangeText={setSearchLocationQuery}
-                placeholder="Enter address or postcode"
-                placeholderTextColor="#94A3B8"
-                returnKeyType="search"
-                autoCapitalize="words"
-                onSubmitEditing={submitSearchLocation}
-              />
-              <TouchableOpacity
-                style={[styles.searchLocationSubmit, searchingLocation && styles.searchLocationSubmitDisabled]}
-                onPress={submitSearchLocation}
-                disabled={searchingLocation}
-              >
-                <Ionicons name={searchingLocation ? 'hourglass-outline' : 'arrow-forward'} size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.searchLocationClose} onPress={() => setSearchLocationInputVisible(false)}>
-                <Ionicons name="close" size={18} color="#64748B" />
-              </TouchableOpacity>
+            <View>
+              <View style={styles.searchLocationInputRow}>
+                <Ionicons name="search" size={18} color="#64748B" />
+                <TextInput
+                  style={styles.searchLocationInput}
+                  value={searchLocationQuery}
+                  onChangeText={setSearchLocationQuery}
+                  placeholder="Enter address or postcode"
+                  placeholderTextColor="#94A3B8"
+                  returnKeyType="search"
+                  autoCapitalize="words"
+                  onSubmitEditing={submitSearchLocation}
+                />
+                <TouchableOpacity
+                  style={[styles.searchLocationSubmit, searchingLocation && styles.searchLocationSubmitDisabled]}
+                  onPress={submitSearchLocation}
+                  disabled={searchingLocation}
+                >
+                  <Ionicons name={searchingLocation ? 'hourglass-outline' : 'arrow-forward'} size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.searchLocationClose} onPress={() => setSearchLocationInputVisible(false)}>
+                  <Ionicons name="close" size={18} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+              {searchLocationHistory.length ? (
+                <View style={styles.searchHistoryPanel}>
+                  <Text style={styles.searchHistoryTitle}>Recent searches</Text>
+                  {searchLocationHistory.map((item) => (
+                    <TouchableOpacity key={`${item.latitude}-${item.longitude}-${item.query || item.label}`} style={styles.searchHistoryItem} onPress={() => selectSearchLocation(item)}>
+                      <Ionicons name="time-outline" size={15} color="#64748B" />
+                      <Text style={styles.searchHistoryText} numberOfLines={1}>{getSearchLocationLabel(item)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </View>
           ) : (
-            <View style={styles.searchLocationCollapsedRow}>
-              <TouchableOpacity
-                style={styles.searchLocationButton}
-                onPress={() => setSearchLocationInputVisible(true)}
-                activeOpacity={0.9}
-              >
-                <Ionicons name="location-outline" size={17} color={APP_PURPLE} />
-                <Text style={styles.searchLocationButtonText} numberOfLines={1}>
-                  {searchLocation ? activeSearchLocationLabel : 'Search location'}
-                </Text>
-              </TouchableOpacity>
-              {searchLocation ? (
-                <TouchableOpacity style={styles.currentLocationButton} onPress={useCurrentLocationForSearch}>
-                  <Ionicons name="navigate-outline" size={16} color="#475569" />
+            <View>
+              <View style={styles.searchLocationCollapsedRow}>
+                <TouchableOpacity
+                  style={styles.searchLocationButton}
+                  onPress={() => setSearchLocationInputVisible(true)}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="location-outline" size={17} color={APP_PURPLE} />
+                  <Text style={styles.searchLocationButtonText} numberOfLines={1}>
+                    {searchLocation ? activeSearchLocationLabel : 'Search location'}
+                  </Text>
                 </TouchableOpacity>
+                {searchLocation ? (
+                  <TouchableOpacity style={styles.currentLocationButton} onPress={useCurrentLocationForSearch}>
+                    <Ionicons name="navigate-outline" size={16} color="#475569" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              {searchLocation ? (
+                <View style={styles.searchModeSwitchRow}>
+                  <View style={styles.searchModeSwitchTextWrap}>
+                    <Text style={styles.searchModeSwitchTitle}>Search area active</Text>
+                    <Text style={styles.searchModeSwitchSubtitle}>Turn off to use your current location</Text>
+                  </View>
+                  <Switch
+                    value
+                    onValueChange={(enabled) => {
+                      if (!enabled) useCurrentLocationForSearch();
+                    }}
+                    trackColor={{ false: '#CBD5E1', true: '#C7D2FE' }}
+                    thumbColor={APP_PURPLE}
+                  />
+                </View>
               ) : null}
             </View>
           )}
@@ -1116,6 +1193,37 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     width: 40,
   },
+  searchModeSwitchRow: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    borderWidth: 1,
+    elevation: 3,
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  searchModeSwitchTextWrap: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  searchModeSwitchTitle: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  searchModeSwitchSubtitle: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
   searchLocationInputRow: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -1156,6 +1264,39 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     width: 34,
+  },
+  searchHistoryPanel: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    borderWidth: 1,
+    elevation: 4,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+  },
+  searchHistoryTitle: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '900',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  searchHistoryItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    minHeight: 32,
+  },
+  searchHistoryText: {
+    color: '#334155',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    marginLeft: 8,
   },
   createDeckOuter: {
     position: 'absolute',

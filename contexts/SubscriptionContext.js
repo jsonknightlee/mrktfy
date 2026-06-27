@@ -163,9 +163,9 @@ export const SUBSCRIPTION_PLANS = {
   },
   prospector: {
     id: 'prospector',
-    name: 'Prospector',
-    tagline: 'Find deals before others do',
-    bestFor: 'Active house-hunting',
+    name: 'Buyer',
+    tagline: 'Organise one active buying journey',
+    bestFor: 'Home buyers progressing one property at a time',
     prices: {
       month: { amount: 999, display: '£9.99' },
       year: { amount: 9999, display: '£99.99', subtext: '2 months free' }
@@ -176,12 +176,12 @@ export const SUBSCRIPTION_PLANS = {
       isDefaultEntryPoint: true
     },
     features: [
-      'Advanced filters',
-      'Saved searches',
-      'Unlimited favourites',
+      '1 Property Deck',
+      '1 shortlist',
+      '1 Decision Board with up to 10 options',
+      '1 Buyer Workspace property at a time',
       'Price-drop alerts',
-      'Faster listing refresh',
-      'Enhanced AR highlights'
+      'Ad-free experience'
     ],
     searchRadiusKm: 5,
     limits: {
@@ -192,6 +192,11 @@ export const SUBSCRIPTION_PLANS = {
       arSearchesPerMonth: 50,
       adsEnabled: false,
       adsFrequency: 'never',
+      propertyDecksMax: 1,
+      shortlistsMax: 1,
+      decisionBoardsMax: 1,
+      decisionBoardPropertiesMax: 10,
+      buyerWorkspaceItemsMax: 1,
     },
     color: '#007AFF',
   },
@@ -205,11 +210,11 @@ export const SUBSCRIPTION_PLANS = {
       year: { amount: 29999, display: '£299.99', subtext: '2 months free' }
     },
     features: [
-      'Multi-area tracking',
-      'Watchlists & collections',
-      'Stronger deal signals',
+      '5 Property Decks',
+      'Location search in map view',
+      'Decision Boards with up to 20 properties',
+      '5 Buyer Workspace properties',
       'Priority listing refresh',
-      'Export & sharing tools',
       'Investor analytics'
     ],
     searchRadiusKm: 10,
@@ -221,6 +226,9 @@ export const SUBSCRIPTION_PLANS = {
       arSearchesPerMonth: 200,
       adsEnabled: false,
       adsFrequency: 'never',
+      propertyDecksMax: 5,
+      decisionBoardPropertiesMax: 20,
+      buyerWorkspaceItemsMax: 5,
     },
     color: '#10B981',
   },
@@ -722,7 +730,7 @@ export function SubscriptionProvider({ children }) {
           
           if (subscriptionLevel) {
             // Check if this is a trial-eligible plan
-            const isTrialEligible = subscriptionLevelId === 'prospector'; // Only prospector has trials
+            const isTrialEligible = subscriptionLevelId === 'prospector'; // Buyer has trials
             
             let trialStartDate = null;
             let trialEndDate = null;

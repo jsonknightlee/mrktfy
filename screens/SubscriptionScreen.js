@@ -63,9 +63,9 @@ const planConfig = {
     },
     {
       key: "prospector",
-      name: "Prospector",
-      tagline: "Find deals before others do",
-      bestFor: "Active house-hunting",
+      name: "Buyer",
+      tagline: "Organise one active buying journey",
+      bestFor: "Home buyers progressing one property at a time",
       isAvailable: true,
       badges: ["Recommended", "7-day free trial"],
       prices: {
@@ -78,12 +78,13 @@ const planConfig = {
         isDefaultEntryPoint: true
       },
       features: [
-        "Advanced filters",
-        "Saved searches",
-        "Unlimited favourites",
+        "1 Property Deck",
+        "1 shortlist",
+        "1 Decision Board",
+        "Up to 10 Decision Board options",
+        "1 Buyer Workspace property at a time",
+        "Delete the Buyer Workspace item to move another property",
         "Price-drop alerts",
-        "Faster listing refresh",
-        "Enhanced AR highlights",
         "Ad-free experience"
       ],
       limits: {
@@ -94,6 +95,11 @@ const planConfig = {
         arSearchesPerMonth: 50,
         adsEnabled: false,
         adsFrequency: 'never',
+        propertyDecksMax: 1,
+        shortlistsMax: 1,
+        decisionBoardsMax: 1,
+        decisionBoardPropertiesMax: 10,
+        buyerWorkspaceItemsMax: 1,
       },
       color: "#007AFF",
       searchRadiusKm: 5,
@@ -117,11 +123,11 @@ const planConfig = {
         enabled: false
       },
       features: [
-        "Multi-area tracking",
-        "Watchlists & collections",
-        "Stronger deal signals",
+        "5 Property Decks",
+        "Location search in the main map view",
+        "Decision Boards with up to 20 properties",
+        "5 Buyer Workspace properties from Move to Buy",
         "Priority listing refresh",
-        "Export & sharing tools",
         "Investor analytics (rolling out)"
       ],
       limits: {
@@ -129,7 +135,10 @@ const planConfig = {
         alertsEnabled: true,
         refreshPriority: "priority",
         notificationsPerMonth: 500,
-        arSearchesPerMonth: 200
+        arSearchesPerMonth: 200,
+        propertyDecksMax: 5,
+        decisionBoardPropertiesMax: 20,
+        buyerWorkspaceItemsMax: 5,
       },
       cta: {
         type: "upgrade_or_manage",

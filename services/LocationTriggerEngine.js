@@ -216,7 +216,7 @@ class LocationTriggerEngine {
       const response = await postLocationJson('/location/check-hot-zone', {
           latitude: location.latitude,
           longitude: location.longitude,
-          radius: 5000, // 5km for Prospector tier
+          radius: 5000, // 5km for Buyer tier
           lastKnownLocation: this.lastKnownLocation,
       });
 
@@ -307,7 +307,7 @@ class LocationTriggerEngine {
       }
     }
 
-    // Check daily limit (5 per day for Prospector)
+    // Check daily limit (5 per day for Buyer)
     if (this.dailyNotificationCount >= 5) {
       return false;
     }

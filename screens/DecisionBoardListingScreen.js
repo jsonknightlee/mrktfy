@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ImageView from 'react-native-image-viewing';
 import { WebView } from 'react-native-webview';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import {
   addDecisionBoardMedia,
   addDecisionBoardNote,
@@ -36,7 +37,7 @@ import {
   updateDecisionBoardTask,
   USER_VERDICTS,
 } from '../services/DecisionBoardService';
-import { getBuyerWorkspaceItems, saveBuyerWorkspaceItem } from '../services/BuyerWorkspaceStorageService';
+import { getBuyerWorkspaceItems, getBuyerWorkspaceLimit, saveBuyerWorkspaceItem } from '../services/BuyerWorkspaceStorageService';
 import { getListingById } from '../services/listingApi';
 
 const APP_PURPLE = '#6366F1';
@@ -257,6 +258,8 @@ const findLinkedBrokerForBoardBrokerId = (decisionBoardBrokerId, linkedBrokers =
 
 export default function DecisionBoardListingScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
+  const { currentTier } = useSubscription();
+  const workspaceLimit = getBuyerWorkspaceLimit(currentTier);
   const board = route.params?.decisionBoard || null;
   const [decisionListing, setDecisionListing] = useState(route.params?.decisionBoardListing || null);
   const [fullListing, setFullListing] = useState(decisionListing?.listing || null);
@@ -349,6 +352,44 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
   }, [decisionListing?.id, decisionListing?.listingId, decisionListing?.ListingID, listing?.ID, listing?.id]));
 
   const moveToBuy = async () => {
+    if (workspaceLimit <= 0) {
+      Alert.alert(
+        'Buyer Workspace is a Buyer feature',
+        'Upgrade to Buyer to move Decision Board listings into the buying journey.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
+        ]
+      );
+      return;
+    }
+
+    const workspaceItems = await getBuyerWorkspaceItems();
+    const activeOtherItems = workspaceItems.filter((item) => {
+      const itemDecisionListingId = item?.decisionBoardListingId || item?.DecisionBoardListingID;
+      if (itemDecisionListingId && decisionListing?.id && String(itemDecisionListingId) === String(decisionListing.id)) {
+        return false;
+      }
+
+      const itemListingId = item?.listingId || item?.ListingID;
+      const currentListingId = decisionListing?.listingId || decisionListing?.ListingID || listing?.ID || listing?.id;
+      return !(itemListingId && currentListingId && String(itemListingId) === String(currentListingId));
+    });
+
+    if (activeOtherItems.length >= workspaceLimit) {
+      Alert.alert(
+        'Buyer Workspace limit reached',
+        workspaceLimit === 1
+          ? 'Buyer includes 1 active Buyer Workspace property. Delete it to move another property, or upgrade to Investor.'
+          : `Your plan includes ${workspaceLimit} active Buyer Workspace properties.`,
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
+        ]
+      );
+      return;
+    }
+
     const workspaceItem = await saveBuyerWorkspaceItem({
       decisionBoardId: board?.id,
       decisionBoardListingId: decisionListing?.id,

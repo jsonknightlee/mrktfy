@@ -61,14 +61,15 @@ export default function LoginScreen({ navigation }) {
 
   const handleLogin = async () => {
     if (submitting) return;
+    const username = Email.trim();
 
-    if (!Email || !Password) {
+    if (!username || !Password) {
       Alert.alert('Missing details', 'Please enter your email and password.');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(Email)) {
+    if (!emailRegex.test(username)) {
       Alert.alert('Invalid email', 'Please enter a valid email address.');
       return;
     }
@@ -76,9 +77,9 @@ export default function LoginScreen({ navigation }) {
     setSubmitting(true);
 
     try {
-      console.log('🔐 [LOGIN] Attempting login with:', { Email });
+      console.log('🔐 [LOGIN] Attempting login with:', { Username: username });
 
-      const response = await loginUser({ Email, Password });
+      const response = await loginUser({ Username: username, Password });
       const token = response.token;
 
       console.log('✅ [LOGIN] Login successful, token received');

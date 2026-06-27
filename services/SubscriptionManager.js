@@ -5,7 +5,7 @@ class SubscriptionManager {
     this.tiers = {
       prospector: {
         id: 'prospector',
-        name: 'Prospector',
+        name: 'Buyer',
         price: 9.99,
         billing: 'monthly',
         features: {
@@ -20,7 +20,7 @@ class SubscriptionManager {
           heatmaps: false,
           advancedFilters: false,
         },
-        description: 'Perfect for property hunters starting their search',
+        description: 'Perfect for buyers managing one active property journey',
         popular: true,
       },
       investor: {
@@ -290,7 +290,7 @@ class SubscriptionManager {
     if (!this.currentSubscription) {
       return {
         suggestedTier: 'prospector',
-        reason: 'Start with a free trial to unlock location-based alerts',
+        reason: 'Start with a free trial to unlock Buyer planning tools',
         urgency: 'high',
       };
     }

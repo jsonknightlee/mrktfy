@@ -1,11 +1,42 @@
 import Constants from "expo-constants";
 const { API_BASE_URL, API_BACKUP_BASE_URL, API_KEY } = Constants.expoConfig.extra;
+const NEARBY_FETCH_TIMEOUT_MS = 5000;
 
-// Supports `type` = 'rental' | 'sale' and an optional result limit.
-export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale', limit = 2000) => {
+const appendParam = (params, key, value) => {
+  if (value === undefined || value === null || value === '') return;
+  params.append(key, value);
+};
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = NEARBY_FETCH_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+// Supports `type` = 'rental' | 'sale', an optional result limit, and server-side filters.
+export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale', limit = 350, filters = {}) => {
   // Convert 'sale' to 'for-sale' for the API
   const apiType = type === 'sale' ? 'for-sale' : type;
-  let url = `${API_BASE_URL}/realestate/nearby?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}&type=${apiType}&limit=${limit}`;
+  const params = new URLSearchParams();
+  appendParam(params, 'lat', lat);
+  appendParam(params, 'lng', lng);
+  appendParam(params, 'radiusKm', radiusKm);
+  appendParam(params, 'type', apiType);
+  appendParam(params, 'limit', limit);
+  appendParam(params, 'minPrice', filters.minPrice);
+  appendParam(params, 'maxPrice', filters.maxPrice && Number(filters.maxPrice) > 1000000 ? '' : filters.maxPrice);
+  appendParam(params, 'bedrooms', filters.beds);
+  appendParam(params, 'bathrooms', filters.baths);
+
+  let url = `${API_BASE_URL}/realestate/nearby?${params.toString()}`;
   console.log('Calling:', url);
 
   try {
@@ -18,12 +49,13 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
 
     let res;
     try {
-      res = await fetch(url, requestOptions);
+      res = await fetchWithTimeout(url, requestOptions);
     } catch (fetchError) {
       if (!API_BACKUP_BASE_URL) throw fetchError;
-      url = `${API_BACKUP_BASE_URL}/realestate/nearby?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}&type=${apiType}&limit=${limit}`;
+      console.warn('Primary nearby listings request failed:', fetchError?.name || fetchError?.message || fetchError);
+      url = `${API_BACKUP_BASE_URL}/realestate/nearby?${params.toString()}`;
       console.log('Primary nearby listings request failed, retrying backup:', url);
-      res = await fetch(url, requestOptions);
+      res = await fetchWithTimeout(url, requestOptions);
     }
 
     const contentType = res.headers.get('content-type');
@@ -59,29 +91,20 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
       return [];
     }
 
-    console.log('� Processed listings count:', listings.length);
-    
-    if (listings.length > 0) {
-      const sampleListing = listings[0];
-      console.log('📊 Sample listing fields:', Object.keys(sampleListing));
-    }
+    console.log('Processed listings count:', listings.length);
 
     // 🔥 Clean the ImageUrls field for each listing
     data = listings.map((listing) => {
       let imageUrls = [];
 
       // Handle ImageUrls - could be string, array, or already processed
-      console.log('🔍 ImageUrls type check for listing ID:', listing.ID, 'type:', typeof listing.ImageUrls, 'isArray:', Array.isArray(listing.ImageUrls));
-      
       if (Array.isArray(listing.ImageUrls)) {
         // Already an array, process directly
         const seen = new Set();
         imageUrls = listing.ImageUrls
           .map((url) => url.replace(':p', ''))
           .filter((url) => url.includes('1024/768') && !seen.has(url) && seen.add(url));
-        console.log('🖼️ ImageUrls already array for listing ID:', listing.ID, 'processed:', imageUrls.length);
       } else if (typeof listing.ImageUrls === 'string') {
-        console.log('🔍 Processing ImageUrls string for listing ID:', listing.ID);
         try {
           // Try to parse as JSON first
           const parsed = JSON.parse(listing.ImageUrls);
@@ -91,13 +114,8 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
             imageUrls = parsed
               .map((url) => url.replace(':p', ''))
               .filter((url) => url.includes('1024/768') && !seen.has(url) && seen.add(url));
-            console.log('🖼️ ImageUrls parsed from JSON string for listing ID:', listing.ID, 'processed:', imageUrls.length);
-          } else {
-            console.log('🔍 Parsed result is not an array for listing ID:', listing.ID, 'type:', typeof parsed);
           }
         } catch (e) {
-          console.warn('JSON parsing failed for listing ID:', listing.ID, 'trying alternative method');
-          
           // Alternative: Manual parsing if JSON.parse fails
           try {
             const cleanString = listing.ImageUrls.trim();
@@ -108,16 +126,9 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
               imageUrls = items
                 .map((url) => url.replace(':p', ''))
                 .filter((url) => url.includes('1024/768') && !seen.has(url) && seen.add(url));
-              console.log('🖼️ ImageUrls processed via alternative method for listing ID:', listing.ID, 'processed:', imageUrls.length);
-            } else {
-              console.warn('Invalid format for listing ID:', listing.ID, 'not starting/ending with brackets');
             }
-          } catch (altError) {
-            console.warn('Alternative parsing also failed for listing ID:', listing.ID, altError.message);
-          }
+          } catch {}
         }
-      } else {
-        console.log('🖼️ ImageUrls not found or invalid type for listing ID:', listing.ID, typeof listing.ImageUrls);
       }
 
       // 🔍 Preserve new fields if they exist
@@ -125,7 +136,6 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
       ['PropertyTimeline', 'Schools', 'Stations', 'AdditionalInfo'].forEach(field => {
         if (listing[field] !== undefined) {
           preservedFields[field] = listing[field];
-          console.log(`✅ Preserved ${field}:`, typeof listing[field], listing[field]);
         }
       });
 

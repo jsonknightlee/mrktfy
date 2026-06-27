@@ -74,6 +74,8 @@ const hasInfoData = (value) => {
   return false;
 };
 
+const canUseDecisionBoard = (tier) => ['prospector', 'investor', 'developer'].includes(String(tier || '').toLowerCase());
+
 export default function ListingDetailScreen({ route, navigation }) {
   const listing = normalizeDetailListing(route.params?.listing);
   const openedFromDecisionBoard = route.params?.source === 'decisionBoard' || Boolean(route.params?.decisionBoardListingId);
@@ -100,6 +102,7 @@ export default function ListingDetailScreen({ route, navigation }) {
   const [floorPlanModalVisible, setFloorPlanModalVisible] = useState(false);
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
   const { currentTier, shouldShowAd } = useSubscription();
+  const hasDecisionBoardAccess = canUseDecisionBoard(currentTier);
   const isFavorited = getFavoriteStatus(listing.ID)?.isFavorited ?? !!route.params.listing?.isFavorited;
   const lastViewedAt = getFavoriteStatus(listing.ID)?.lastViewedAt;
 
@@ -181,6 +184,18 @@ useEffect(() => {
   const openAgentEnquiry = () => navigation.navigate('ContactAgent', { listing });
 
   const openDecisionBoard = async () => {
+    if (!hasDecisionBoardAccess) {
+      Alert.alert(
+        'Decision Board is a Buyer feature',
+        'Upgrade to Buyer to pursue listings in a Decision Board.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
+        ]
+      );
+      return;
+    }
+
     const listingId = getListingId(listing);
     if (!listingId) return;
 
@@ -311,11 +326,13 @@ useEffect(() => {
 
         {!openedFromDecisionBoard ? (
           <TouchableOpacity
-            style={styles.decisionButton}
+            style={[styles.decisionButton, !hasDecisionBoardAccess && styles.decisionButtonDisabled]}
             onPress={openDecisionBoard}
           >
-            <Ionicons name="flag-outline" size={20} color="#fff" />
-            <Text style={styles.decisionButtonText}>Pursue in Decision Board</Text>
+            <Ionicons name={hasDecisionBoardAccess ? 'flag-outline' : 'lock-closed-outline'} size={20} color={hasDecisionBoardAccess ? '#fff' : '#94A3B8'} />
+            <Text style={[styles.decisionButtonText, !hasDecisionBoardAccess && styles.decisionButtonTextDisabled]}>
+              {hasDecisionBoardAccess ? 'Pursue in Decision Board' : 'Unlock Decision Board'}
+            </Text>
           </TouchableOpacity>
         ) : null}
 
