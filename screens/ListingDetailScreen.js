@@ -74,7 +74,7 @@ const hasInfoData = (value) => {
   return false;
 };
 
-const canUseDecisionBoard = (tier) => ['prospector', 'investor', 'developer'].includes(String(tier || '').toLowerCase());
+const canUseDecisionBoard = (tier) => ['free', 'prospector', 'investor', 'developer'].includes(String(tier || 'free').toLowerCase());
 
 export default function ListingDetailScreen({ route, navigation }) {
   const listing = normalizeDetailListing(route.params?.listing);

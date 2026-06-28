@@ -36,6 +36,7 @@ import {
   renamePropertyDeck,
   restorePropertyDeck,
   saveToShortlist,
+  formatPropertyDeckLimit,
 } from '../services/PropertyDeckService';
 
 const APP_PURPLE = '#6366F1';
@@ -809,6 +810,7 @@ export default function PropertyDeckScreen({ route }) {
   const [buyChecklistProgress, setBuyChecklistProgress] = useState({});
 
   const deckLimit = getPropertyDeckLimit(currentTier);
+  const deckLimitLabel = formatPropertyDeckLimit(deckLimit);
   const selectedDeck = decks.find((deck) => String(deck.id) === String(selectedDeckId)) || null;
   const selectedShortlist = selectedDeck?.shortlist || [];
   const hasYourFitRanks = selectedShortlist.some((listing) => getRankNumber(listing, 'yourFit') !== Number.POSITIVE_INFINITY);
@@ -1664,7 +1666,7 @@ export default function PropertyDeckScreen({ route }) {
         <View>
           <Text style={styles.title}>Property Decks</Text>
           <Text style={styles.subtitle}>
-            {decks.length} of {deckLimit} decks used on {String(currentTier || 'free')} tier.
+            {decks.length} of {deckLimitLabel} decks used on {String(currentTier || 'free')} tier.
           </Text>
         </View>
         <TouchableOpacity
@@ -1681,7 +1683,7 @@ export default function PropertyDeckScreen({ route }) {
           <Ionicons name="lock-closed-outline" size={44} color="#C7CDD8" />
           <Text style={styles.emptyTitle}>Property Decks are a paid feature</Text>
           <Text style={styles.emptyText}>
-            Buyer includes 1 deck, Investor includes 5, and Developer includes 10.
+            Buyer, Investor, and Developer include unlimited Property Decks.
           </Text>
         </View>
       ) : (

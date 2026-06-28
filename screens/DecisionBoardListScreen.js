@@ -26,7 +26,7 @@ import { getListingById } from '../services/listingApi';
 
 const APP_PURPLE = '#6366F1';
 const DECISION_BOARD_COUNT_LIMITS = {
-  free: 0,
+  free: 1,
   prospector: 1,
   investor: 5,
   developer: 10,
@@ -36,6 +36,10 @@ const getDecisionBoardCountLimit = (tier) => {
   const normalizedTier = String(tier || 'free').toLowerCase();
   return DECISION_BOARD_COUNT_LIMITS[normalizedTier] ?? 0;
 };
+
+const getDefaultBoardType = (tier) => (
+  String(tier || 'free').toLowerCase() === 'free' ? 'Free' : 'Buyer'
+);
 
 const normalizeImageUrls = (value) => {
   if (!value) return [];
@@ -145,7 +149,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
   const [savingBoardId, setSavingBoardId] = useState(null);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [boardName, setBoardName] = useState('');
-  const [boardType, setBoardType] = useState('Buyer');
+  const [boardType, setBoardType] = useState(() => getDefaultBoardType(currentTier));
   const boardCountLimit = getDecisionBoardCountLimit(currentTier);
 
   const pendingImageUrl = useMemo(
@@ -240,6 +244,12 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     }
   }, [pendingListing, pendingSource.suggestedBoardName]);
 
+  useEffect(() => {
+    if (createModalVisible) {
+      setBoardType(getDefaultBoardType(currentTier));
+    }
+  }, [createModalVisible, currentTier]);
+
   const addPendingListingToBoard = async (board) => {
     const listingId = getListingId(pendingListing);
     if (!listingId || !board?.id || savingBoardId) return;
@@ -286,11 +296,15 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     }
 
     if (boards.length >= boardCountLimit) {
+      const limitMessage = String(currentTier || 'free').toLowerCase() === 'free'
+        ? 'Free includes 1 Decision Board. Upgrade to Buyer for the full buying workflow and Buyer Workspace.'
+        : boardCountLimit === 1
+          ? 'Buyer includes 1 Decision Board. Delete or close an existing board, or upgrade to Investor.'
+          : `Your plan includes ${boardCountLimit} Decision Boards.`;
+
       Alert.alert(
         'Decision Board limit reached',
-        boardCountLimit === 1
-          ? 'Buyer includes 1 Decision Board. Delete or close an existing board, or upgrade to Investor.'
-          : `Your plan includes ${boardCountLimit} Decision Boards.`,
+        limitMessage,
         [
           { text: 'Not now', style: 'cancel' },
           { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
@@ -317,7 +331,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         boardName: trimmedName,
         boardType,
         status: 'Active',
-        maxProperties: BOARD_LIMITS[boardType],
+        maxProperties: BOARD_LIMITS[boardType] || BOARD_LIMITS.Free,
       });
 
       if (pendingListing) {

@@ -18,16 +18,16 @@ const planConfig = {
   defaultInterval: "month",
   trial: {
     enabled: true,
-    durationDays: 7,
-    appliesToPlanKeys: ["prospector"],
-    trialCopy: "Start your 7-day free trial"
+    durationDays: 14,
+    appliesToPlanKeys: ["prospector", "investor"],
+    trialCopy: "Start your 14-day free trial"
   },
   plans: [
     {
       key: "free",
       name: "Free",
-      tagline: "Basic property search",
-      bestFor: "Casual browsing",
+      tagline: "Discover properties around you and start your property journey.",
+      bestFor: "Casual browsing and first-time users.",
       isAvailable: true,
       badges: ["Always free"],
       prices: {
@@ -38,12 +38,21 @@ const planConfig = {
         enabled: false,
       },
       features: [
-        "Basic property search",
-        "Limited property details",
-        "Save up to 10 properties",
-        "Map view",
-        "Basic filters",
-        "Ads supported"
+        "Browse nearby properties",
+        "Search a location",
+        "Interactive map",
+        "Basic property filters",
+        "Save up to 10 favourite properties",
+        "1 Property Deck",
+        "1 Shortlist",
+        "1 Decision Board",
+        "Basic property details",
+        "Basic property notifications",
+        "Preview premium features throughout the app",
+        "Buyer Workspace locked",
+        "AI Rankings locked",
+        "Advanced Comparison Board locked",
+        "Advanced alerts locked"
       ],
       limits: {
         savedSearchesMax: 5,
@@ -53,38 +62,53 @@ const planConfig = {
         arSearchesPerMonth: 10,
         adsEnabled: true,
         adsFrequency: 'always',
+        propertyDecksMax: 1,
+        shortlistsMax: 1,
+        decisionBoardsMax: 1,
+        decisionBoardPropertiesMax: 10,
+        buyerWorkspaceItemsMax: 0,
       },
       color: "#666",
       searchRadiusKm: 2,
       cta: {
         type: "current_plan",
-        label: "Current plan"
+        label: "Get Started"
       }
     },
     {
       key: "prospector",
       name: "Buyer",
-      tagline: "Organise one active buying journey",
-      bestFor: "Home buyers progressing one property at a time",
+      tagline: "Everything you need to organise your home buying journey.",
+      bestFor: "Home buyers actively searching for their next home.",
       isAvailable: true,
-      badges: ["Recommended", "7-day free trial"],
+      badges: ["Recommended", "14-day free trial"],
       prices: {
         month: { "amount": 999, "display": "£9.99" },
         year: { "amount": 9999, "display": "£99.99", "subtext": "2 months free" }
       },
       trial: {
         enabled: true,
-        durationDays: 7,
+        durationDays: 14,
         isDefaultEntryPoint: true
       },
       features: [
-        "1 Property Deck",
-        "1 shortlist",
-        "1 Decision Board",
-        "Up to 10 Decision Board options",
-        "1 Buyer Workspace property at a time",
-        "Delete the Buyer Workspace item to move another property",
-        "Price-drop alerts",
+        "Everything in Free",
+        "Unlimited Property Decks",
+        "Unlimited Shortlists",
+        "Decision Boards",
+        "Buyer Workspace",
+        "Up to 10 active properties per Decision Board",
+        "AI Property Ranking",
+        "Your Fit Ranking",
+        "Property Comparison Board",
+        "Viewing Timeline",
+        "Viewing Notes",
+        "Estate Agent Management",
+        "Mortgage Broker Tracking",
+        "Property Media & Documents",
+        "Buying Checklists",
+        "AI Buying Assistant",
+        "Price Drop Alerts",
         "Ad-free experience"
       ],
       limits: {
@@ -95,8 +119,8 @@ const planConfig = {
         arSearchesPerMonth: 50,
         adsEnabled: false,
         adsFrequency: 'never',
-        propertyDecksMax: 1,
-        shortlistsMax: 1,
+        propertyDecksMax: "Unlimited",
+        shortlistsMax: "Unlimited",
         decisionBoardsMax: 1,
         decisionBoardPropertiesMax: 10,
         buyerWorkspaceItemsMax: 1,
@@ -105,28 +129,34 @@ const planConfig = {
       searchRadiusKm: 5,
       cta: {
         type: "start_trial_or_manage",
-        label: "Start 7-day free trial"
+        label: "Start 14-day free trial"
       }
     },
     {
       key: "investor",
       name: "Investor",
-      tagline: "Track, analyse, and act at scale",
-      bestFor: "Deal hunters & landlords",
+      tagline: "Analyse opportunities and grow your portfolio.",
+      bestFor: "Property investors and landlords.",
       isAvailable: true,
-      badges: ["Power user"],
+      badges: ["Power User", "14-day free trial"],
       prices: {
         month: { "amount": 2999, "display": "£29.99" },
         year: { "amount": 29999, "display": "£299.99", "subtext": "2 months free" }
       },
       trial: {
-        enabled: false
+        enabled: true,
+        durationDays: 14
       },
       features: [
-        "5 Property Decks",
-        "Location search in the main map view",
-        "Decision Boards with up to 20 properties",
-        "5 Buyer Workspace properties from Move to Buy",
+        "Everything in Buyer",
+        "Multiple active Decision Boards",
+        "Up to 20 properties per Decision Board",
+        "Multiple Buyer Workspaces",
+        "Investment Rankings",
+        "Yield Estimates",
+        "Comparable Property Analysis",
+        "Rental Market Insights",
+        "Growth Potential Scores",
         "Priority listing refresh",
         "Investor analytics (rolling out)"
       ],
@@ -136,20 +166,21 @@ const planConfig = {
         refreshPriority: "priority",
         notificationsPerMonth: 500,
         arSearchesPerMonth: 200,
-        propertyDecksMax: 5,
+        propertyDecksMax: "Unlimited",
+        shortlistsMax: "Unlimited",
         decisionBoardPropertiesMax: 20,
         buyerWorkspaceItemsMax: 5,
       },
       cta: {
-        type: "upgrade_or_manage",
-        label: "Upgrade to Investor"
+        type: "start_trial_or_manage",
+        label: "Start 14-day free trial"
       }
     },
     {
       key: "developer",
       name: "Developer",
-      tagline: "Build, scale, and automate",
-      bestFor: "Builders, agencies & large portfolios",
+      tagline: "Identify and manage development opportunities.",
+      bestFor: "Developers, builders and professional property businesses.",
       isAvailable: false,
       badges: ["Coming soon"],
       overlay: {
@@ -164,11 +195,15 @@ const planConfig = {
         enabled: false
       },
       features: [
-        "Bulk area & land tracking",
-        "Planning & zoning overlays",
-        "Development opportunity signals",
-        "Multi-user access",
-        "Advanced reporting & exports",
+        "Everything in Investor",
+        "Planning Intelligence",
+        "Development Opportunity Detection",
+        "Land & Site Analysis",
+        "Price per Sq Ft Intelligence",
+        "GDV Tools",
+        "Multi-user Collaboration",
+        "Advanced Reporting",
+        "Data Export",
         "API access (planned)"
       ],
       limits: {
@@ -212,7 +247,7 @@ export default function SubscriptionScreen({ navigation }) {
 
     if (isCurrentPlan) {
       if (planKey === 'free') {
-        return { type: 'current_plan', label: 'Current plan' };
+        return { type: 'current_plan', label: 'Get Started' };
       }
 
       return isSubscriptionCancelled

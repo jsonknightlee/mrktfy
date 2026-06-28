@@ -24,7 +24,7 @@ export const loginWithGoogle = async (accessToken) => {
   return data.token ?? data;
 };
 
-export const loginWithApple = async (identityToken) => {
-  const { data } = await authApi.post('/apple', { identityToken });
+export const loginWithApple = async (identityToken, fullName) => {
+  const { data } = await authApi.post('/apple', { identityToken, fullName });
   return data.token ?? data;
 };

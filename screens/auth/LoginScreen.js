@@ -151,7 +151,7 @@ export default function LoginScreen({ navigation }) {
           throw new Error('Apple did not return an identity token.');
         }
 
-        const token = await loginWithApple(credential.identityToken);
+        const token = await loginWithApple(credential.identityToken, credential.fullName);
         const user = await fetchUserProfile(token);
         Alert.alert('Welcome', `Hello ${user.Firstname || user.Name || 'there'}!`);
 

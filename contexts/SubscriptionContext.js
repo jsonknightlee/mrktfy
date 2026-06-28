@@ -142,12 +142,21 @@ export const SUBSCRIPTION_PLANS = {
     name: 'Free',
     price: '£0',
     period: '/month',
-    description: 'Basic property search with limited features',
+    tagline: 'Discover properties around you and start your property journey.',
+    bestFor: 'Casual browsing and first-time users.',
+    description: 'Discover properties around you and start your property journey.',
     features: [
-      '✅ Search up to 10 properties',
-      '✅ Basic map view',
-      '✅ Save up to 10 properties',
-      '✅ Limited notifications',
+      'Browse nearby properties',
+      'Search a location',
+      'Interactive map',
+      'Basic property filters',
+      'Save up to 10 favourite properties',
+      '1 Property Deck',
+      '1 Shortlist',
+      '1 Decision Board',
+      'Basic property details',
+      'Basic property notifications',
+      'Preview premium features throughout the app',
     ],
     color: '#666',
     searchRadiusKm: 2,
@@ -159,28 +168,45 @@ export const SUBSCRIPTION_PLANS = {
       arSearchesPerMonth: 10,
       adsEnabled: true,
       adsFrequency: 'always',
+      propertyDecksMax: 1,
+      shortlistsMax: 1,
+      decisionBoardsMax: 1,
+      decisionBoardPropertiesMax: 10,
+      buyerWorkspaceItemsMax: 0,
     },
   },
   prospector: {
     id: 'prospector',
     name: 'Buyer',
-    tagline: 'Organise one active buying journey',
-    bestFor: 'Home buyers progressing one property at a time',
+    tagline: 'Everything you need to organise your home buying journey.',
+    bestFor: 'Home buyers actively searching for their next home.',
     prices: {
       month: { amount: 999, display: '£9.99' },
       year: { amount: 9999, display: '£99.99', subtext: '2 months free' }
     },
     trial: {
       enabled: true,
-      durationDays: 7,
+      durationDays: 14,
       isDefaultEntryPoint: true
     },
     features: [
-      '1 Property Deck',
-      '1 shortlist',
-      '1 Decision Board with up to 10 options',
-      '1 Buyer Workspace property at a time',
-      'Price-drop alerts',
+      'Everything in Free',
+      'Unlimited Property Decks',
+      'Unlimited Shortlists',
+      'Decision Boards',
+      'Buyer Workspace',
+      'Up to 10 active properties per Decision Board',
+      'AI Property Ranking',
+      'Your Fit Ranking',
+      'Property Comparison Board',
+      'Viewing Timeline',
+      'Viewing Notes',
+      'Estate Agent Management',
+      'Mortgage Broker Tracking',
+      'Property Media & Documents',
+      'Buying Checklists',
+      'AI Buying Assistant',
+      'Price Drop Alerts',
       'Ad-free experience'
     ],
     searchRadiusKm: 5,
@@ -192,8 +218,8 @@ export const SUBSCRIPTION_PLANS = {
       arSearchesPerMonth: 50,
       adsEnabled: false,
       adsFrequency: 'never',
-      propertyDecksMax: 1,
-      shortlistsMax: 1,
+      propertyDecksMax: 'Unlimited',
+      shortlistsMax: 'Unlimited',
       decisionBoardsMax: 1,
       decisionBoardPropertiesMax: 10,
       buyerWorkspaceItemsMax: 1,
@@ -203,19 +229,28 @@ export const SUBSCRIPTION_PLANS = {
   investor: {
     id: 'investor',
     name: 'Investor',
-    tagline: 'Track, analyse, and act at scale',
-    bestFor: 'Deal hunters & landlords',
+    tagline: 'Analyse opportunities and grow your portfolio.',
+    bestFor: 'Property investors and landlords.',
     prices: {
       month: { amount: 2999, display: '£29.99' },
       year: { amount: 29999, display: '£299.99', subtext: '2 months free' }
     },
+    trial: {
+      enabled: true,
+      durationDays: 14,
+    },
     features: [
-      '5 Property Decks',
-      'Location search in map view',
-      'Decision Boards with up to 20 properties',
-      '5 Buyer Workspace properties',
+      'Everything in Buyer',
+      'Multiple active Decision Boards',
+      'Up to 20 properties per Decision Board',
+      'Multiple Buyer Workspaces',
+      'Investment Rankings',
+      'Yield Estimates',
+      'Comparable Property Analysis',
+      'Rental Market Insights',
+      'Growth Potential Scores',
       'Priority listing refresh',
-      'Investor analytics'
+      'Investor analytics (rolling out)'
     ],
     searchRadiusKm: 10,
     limits: {
@@ -226,7 +261,8 @@ export const SUBSCRIPTION_PLANS = {
       arSearchesPerMonth: 200,
       adsEnabled: false,
       adsFrequency: 'never',
-      propertyDecksMax: 5,
+      propertyDecksMax: 'Unlimited',
+      shortlistsMax: 'Unlimited',
       decisionBoardPropertiesMax: 20,
       buyerWorkspaceItemsMax: 5,
     },
@@ -235,20 +271,24 @@ export const SUBSCRIPTION_PLANS = {
   developer: {
     id: 'developer',
     name: 'Developer',
-    tagline: 'Build, scale, and automate',
-    bestFor: 'Builders, agencies & large portfolios',
+    tagline: 'Identify and manage development opportunities.',
+    bestFor: 'Developers, builders and professional property businesses.',
     isAvailable: false,
     prices: {
       month: { amount: 4999, display: '£49.99', subtext: 'Coming soon' },
       year: { amount: 49999, display: '£499.99', subtext: 'Coming soon' }
     },
     features: [
-      'Bulk area & land tracking',
-      'Planning & zoning overlays',
-      'Development opportunity signals',
-      'Multi-user access',
-      'Advanced reporting & exports',
-      'API access'
+      'Everything in Investor',
+      'Planning Intelligence',
+      'Development Opportunity Detection',
+      'Land & Site Analysis',
+      'Price per Sq Ft Intelligence',
+      'GDV Tools',
+      'Multi-user Collaboration',
+      'Advanced Reporting',
+      'Data Export',
+      'API access (planned)'
     ],
     searchRadiusKm: 20,
     limits: {
@@ -730,20 +770,21 @@ export function SubscriptionProvider({ children }) {
           
           if (subscriptionLevel) {
             // Check if this is a trial-eligible plan
-            const isTrialEligible = subscriptionLevelId === 'prospector'; // Buyer has trials
+            const isTrialEligible = Boolean(subscriptionLevel.trial?.enabled);
             
             let trialStartDate = null;
             let trialEndDate = null;
             let isInTrial = false;
             
             if (isTrialEligible) {
-              // Start 7-day trial
+              // Start configured trial
               const now = new Date();
               trialStartDate = now.toISOString();
-              trialEndDate = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000)).toISOString(); // 7 days from now
+              const trialDurationDays = subscriptionLevel.trial?.durationDays || 7;
+              trialEndDate = new Date(now.getTime() + (trialDurationDays * 24 * 60 * 60 * 1000)).toISOString();
               isInTrial = true;
               
-              console.log('🎯 Starting 7-day trial for', subscriptionLevelId);
+              console.log(`🎯 Starting ${trialDurationDays}-day trial for`, subscriptionLevelId);
               console.log('🎯 Trial period:', trialStartDate, 'to', trialEndDate);
             }
             

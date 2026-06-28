@@ -77,7 +77,7 @@ const getStatusTag = (listing) => {
   return trimmed.length ? trimmed : null;
 };
 
-const canUseSearchLocation = (tier) => ['investor', 'developer'].includes(String(tier || '').toLowerCase());
+const canUseSearchLocation = (tier) => ['free', 'prospector', 'investor', 'developer'].includes(String(tier || 'free').toLowerCase());
 
 const getSearchLocationLabel = (location) => {
   if (!location) return 'Current location';

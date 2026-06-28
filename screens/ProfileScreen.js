@@ -46,6 +46,10 @@ const formatNumber = (v) => {
   return '';
 };
 
+const firstNonEmpty = (...values) => (
+  values.find(value => typeof value === 'string' ? value.trim().length > 0 : value != null) || ''
+);
+
 export default function ProfileScreen({ navigation }) {
   const { setIsLoggedIn, isLoggedIn: authIsLoggedIn } = useContext(AuthContext);
   const { toggleFavorite, getFavoriteStatus, setLastViewed, activityTick = 0 } = useFavorites();
@@ -127,8 +131,8 @@ export default function ProfileScreen({ navigation }) {
       console.log('👤 [PROFILE] LastName:', userProfile.LastName);
       
       setEditForm({
-        firstName: userProfile.firstName || userProfile.FirstName || userInfo?.FirstName || '',
-        lastName: userProfile.lastName || userProfile.LastName || userInfo?.LastName || '',
+        firstName: firstNonEmpty(userProfile.firstName, userProfile.FirstName, user?.Firstname, user?.FirstName, userInfo?.FirstName),
+        lastName: firstNonEmpty(userProfile.lastName, userProfile.LastName, user?.Lastname, user?.LastName, userInfo?.LastName),
         phone: userProfile.phone || userProfile.Phone || '',
         address: userProfile.address || userProfile.Address || '',
         city: userProfile.city || userProfile.City || '',
@@ -192,6 +196,12 @@ export default function ProfileScreen({ navigation }) {
     try {
       const success = await updateUserProfile(editForm);
       if (success) {
+        await reloadSubscriptionData();
+        setUser(prev => ({
+          ...(prev || {}),
+          Firstname: editForm.firstName,
+          Lastname: editForm.lastName,
+        }));
         setEditMode(false);
         Alert.alert('Success', 'Profile updated successfully!');
       } else {
@@ -329,7 +339,7 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.sectionTitle}>Personal Information</Text>
                 <TouchableOpacity
                   style={styles.editButton}
-                  onPress={() => setEditMode(!editMode)}
+                  onPress={() => editMode ? onSaveProfile() : setEditMode(true)}
                 >
                   <Ionicons name={editMode ? "checkmark" : "create"} size={20} color="#007AFF" />
                   <Text style={styles.editButtonText}>{editMode ? 'Save' : 'Edit'}</Text>
@@ -406,17 +416,17 @@ export default function ProfileScreen({ navigation }) {
                 <View style={styles.profileInfo}>
                   <Text style={styles.infoLabel}>First Name:</Text>
                   <Text style={styles.infoValue}>
-                    {userProfile.FirstName || userProfile.firstName || userInfo?.FirstName || 'Not set'}
+                    {firstNonEmpty(userProfile.FirstName, userProfile.firstName, user?.Firstname, user?.FirstName, userInfo?.FirstName) || 'Not set'}
                   </Text>
                   
                   <Text style={styles.infoLabel}>Last Name:</Text>
                   <Text style={styles.infoValue}>
-                    {userProfile.LastName || userProfile.lastName || userInfo?.LastName || 'Not set'}
+                    {firstNonEmpty(userProfile.LastName, userProfile.lastName, user?.Lastname, user?.LastName, userInfo?.LastName) || 'Not set'}
                   </Text>
                   
                   <Text style={styles.infoLabel}>Email:</Text>
                   <Text style={styles.infoValue}>
-                    {userProfile.Email || userProfile.email || userInfo?.email || userInfo?.Username || 'Not set'}
+                    {firstNonEmpty(userProfile.Email, userProfile.email, user?.Username, userInfo?.email, userInfo?.Username) || 'Not set'}
                   </Text>
                   
                   <Text style={styles.infoLabel}>Phone:</Text>

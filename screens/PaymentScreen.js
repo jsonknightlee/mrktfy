@@ -38,11 +38,11 @@ export default function PaymentScreen({ route, navigation }) {
     if (intentId && !completedAsUpgrade) {
       const confirmation = await confirmSubscriptionPayment(intentId, tier.key, billingInterval);
       if (!confirmation.success) {
-        console.warn('Subscription confirmation failed after Stripe success:', confirmation.error);
+        paymentCompletedRef.current = false;
+        throw new Error(confirmation.error || 'Stripe confirmed payment, but subscription verification failed.');
       }
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
     await reloadSubscriptionData();
 
     const successMessage = reactivate

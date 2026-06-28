@@ -167,7 +167,7 @@ class SubscriptionManager {
     this.trialStatus = {
       tier: 'prospector',
       startedAt: Date.now(),
-      expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+      expiresAt: Date.now() + (14 * 24 * 60 * 60 * 1000), // 14 days
       isActive: true,
     };
 

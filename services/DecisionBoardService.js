@@ -1,6 +1,6 @@
 import { api } from './api';
 
-export const BOARD_TYPES = ['Buyer', 'Investor', 'Developer'];
+export const BOARD_TYPES = ['Free', 'Buyer', 'Investor', 'Developer'];
 export const BOARD_STATUSES = ['Active', 'Tentative', 'Closed'];
 export const LISTING_STATUSES = ['Active', 'Tentative', 'Closed'];
 export const TRAFFIC_LIGHT_STATUSES = ['Green', 'Orange', 'Red'];
@@ -10,6 +10,7 @@ export const BROKER_STATUSES = ['Contacted', 'InProgress', 'Approved', 'Rejected
 export const DECISION_MEDIA_TYPES = ['Photo', 'Video', 'Audio', 'Document'];
 
 export const BOARD_LIMITS = {
+  Free: 10,
   Buyer: 10,
   Investor: 20,
   Developer: 20,

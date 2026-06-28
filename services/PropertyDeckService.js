@@ -9,16 +9,20 @@ const apiFailureCache = new Map();
 const apiInFlightLabels = new Set();
 
 export const PROPERTY_DECK_LIMITS = {
-  free: 0,
-  prospector: 1,
-  investor: 5,
-  developer: 10,
+  free: 1,
+  prospector: Infinity,
+  investor: Infinity,
+  developer: Infinity,
 };
 
 export const getPropertyDeckLimit = (tier) => {
   const normalizedTier = String(tier || 'free').toLowerCase();
   return PROPERTY_DECK_LIMITS[normalizedTier] ?? 0;
 };
+
+export const formatPropertyDeckLimit = (limit) => (
+  limit === Infinity ? 'Unlimited' : String(limit)
+);
 
 export const getListingId = (listing) => {
   if (!listing) return '';

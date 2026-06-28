@@ -315,6 +315,7 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
   ), [imageMediaItems, mediaPreviewUrls]);
   const boardPropertyDeckId = board?.propertyDeckId || board?.PropertyDeckID || board?.PropertyDeckId || null;
   const isInBuyerWorkspace = Boolean(buyerWorkspaceItem);
+  const canUseBuyerWorkspace = workspaceLimit > 0;
 
   useFocusEffect(useCallback(() => {
     let isActive = true;
@@ -966,17 +967,17 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
 
-        {!isInBuyerWorkspace ? (
+        {canUseBuyerWorkspace && !isInBuyerWorkspace ? (
           <TouchableOpacity style={styles.moveToBuyButton} activeOpacity={0.86} onPress={moveToBuy}>
             <Ionicons name="home-outline" size={18} color="#FFFFFF" />
             <Text style={styles.moveToBuyButtonText}>Move to Buy</Text>
           </TouchableOpacity>
-        ) : (
+        ) : canUseBuyerWorkspace ? (
           <TouchableOpacity style={styles.viewInBuyButton} activeOpacity={0.86} onPress={viewInBuy}>
             <Ionicons name="arrow-forward-circle-outline" size={18} color={APP_PURPLE} />
             <Text style={styles.viewInBuyButtonText}>View in Buy</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Status</Text>

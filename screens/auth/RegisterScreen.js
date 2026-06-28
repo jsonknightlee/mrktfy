@@ -70,7 +70,7 @@ export default function RegisterScreen({ navigation }) {
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       });
-      const token = await loginWithApple(credential.identityToken);
+      const token = await loginWithApple(credential.identityToken, credential.fullName);
       await saveToken(token);
       const user = await fetchUserProfile(token);
       Alert.alert('Welcome', `Hello ${user.Firstname}!`);

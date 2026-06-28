@@ -9,6 +9,22 @@ const getPaymentConfig = () => ({
   apiKey: extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY,
 });
 
+const PAYMENT_BACKEND_TIMEOUT_MS = 8000;
+
+const fetchWithTimeout = async (url, options, timeoutMs = PAYMENT_BACKEND_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const buildHeaders = async () => {
   const { apiKey } = getPaymentConfig();
   const token = await getToken();
@@ -70,11 +86,11 @@ const requestPaymentJson = async (path, body) => {
 
   let response;
   try {
-    response = await fetch(`${apiBaseUrl}${path}`, requestOptions);
+    response = await fetchWithTimeout(`${apiBaseUrl}${path}`, requestOptions);
   } catch (error) {
     if (!apiBackupBaseUrl) throw error;
-    console.log('💳 [STRIPE] Primary backend failed, retrying backup:', `${apiBackupBaseUrl}${path}`);
-    response = await fetch(`${apiBackupBaseUrl}${path}`, requestOptions);
+    console.log('💳 [STRIPE] Primary backend failed, retrying backup:', `${apiBackupBaseUrl}${path}`, error.message);
+    response = await fetchWithTimeout(`${apiBackupBaseUrl}${path}`, requestOptions);
   }
 
   return parseJsonResponse(response);
@@ -309,12 +325,19 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
   }
 };
 
-// Webhooks are the source of truth for Stripe subscription updates.
-export const confirmSubscriptionPayment = async (paymentIntentId, tier, billingInterval) => {
-  return {
-    success: true,
-    data: { paymentIntentId, tier, billingInterval, handledByWebhook: true },
-  };
+export const confirmSubscriptionPayment = async (subscriptionId, tier, billingInterval) => {
+  try {
+    const data = await requestPaymentJson('/api/stripe/confirm-subscription', {
+      subscriptionId,
+      tier,
+      billingInterval,
+    });
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('❌ Subscription confirmation error:', error);
+    return { success: false, error: error.message };
+  }
 };
 
 export const cancelStripeSubscription = async ({
