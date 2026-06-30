@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +26,8 @@ import {
 import { getListingById } from '../services/listingApi';
 
 const APP_PURPLE = '#6366F1';
+const DECISION_BOARD_CACHE_KEY = 'mrktfy_decision_boards_cache';
+const DECISION_BOARD_LINKED_SHORTLIST_KEY = 'mrktfy_decision_board_linked_shortlist';
 const DECISION_BOARD_COUNT_LIMITS = {
   free: 1,
   prospector: 1,
@@ -40,6 +43,8 @@ const getDecisionBoardCountLimit = (tier) => {
 const getDefaultBoardType = (tier) => (
   String(tier || 'free').toLowerCase() === 'free' ? 'Free' : 'Buyer'
 );
+
+const shouldLockDecisionBoardShortlist = (tier) => ['free', 'prospector'].includes(String(tier || 'free').toLowerCase());
 
 const normalizeImageUrls = (value) => {
   if (!value) return [];
@@ -167,19 +172,48 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     }).join('|')
   ), [boards]);
 
+  const persistBoardsCache = useCallback((nextBoards) => {
+    AsyncStorage.setItem(DECISION_BOARD_CACHE_KEY, JSON.stringify(nextBoards)).catch(() => {});
+  }, []);
+
   const loadBoards = useCallback(async () => {
-    setLoading(true);
+    let hasCachedBoards = false;
+    const shouldBlockForLoad = !pendingListing;
+
+    try {
+      const cached = await AsyncStorage.getItem(DECISION_BOARD_CACHE_KEY);
+      const parsed = cached ? JSON.parse(cached) : [];
+      if (Array.isArray(parsed) && parsed.length) {
+        hasCachedBoards = true;
+        setBoards(parsed);
+      }
+    } catch {
+      if (shouldBlockForLoad) {
+        setLoading(true);
+      }
+    }
+
+    if (shouldBlockForLoad && !hasCachedBoards) {
+      setLoading(true);
+    } else {
+      setLoading(false);
+    }
+
     try {
       const nextBoards = await getDecisionBoards();
       setBoards(nextBoards);
+      persistBoardsCache(nextBoards);
     } catch (error) {
       Alert.alert('DecisionBoards unavailable', error?.response?.data?.error || error?.message || 'Could not load DecisionBoards.');
     } finally {
-      setLoading(false);
+      if (shouldBlockForLoad && !hasCachedBoards) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [persistBoardsCache]);
 
   useEffect(() => {
+    if (pendingListing) return;
     if (!boards.length) return;
 
     let isCancelled = false;
@@ -189,14 +223,15 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         const listings = board.listings || [];
         let changed = false;
         const nextListings = [...listings];
-
-        for (let index = 0; index < Math.min(listings.length, 4); index += 1) {
-          const boardListing = listings[index];
+        const previewItems = listings.slice(0, 4);
+        const previewResults = await Promise.all(previewItems.map(async (boardListing, previewIndex) => {
           const listing = getBoardListingPreviewWithCache(boardListing, listingPreviewCacheRef.current);
           const existingImage = normalizeImageUrls(getListingImageValue(listing))[0];
           const listingId = getBoardListingId(boardListing);
 
-          if (existingImage || !listingId) continue;
+          if (existingImage || !listingId) {
+            return { boardListing, fullListing: null, previewIndex };
+          }
 
           try {
             let fullListing = listingPreviewCacheRef.current.get(String(listingId));
@@ -206,20 +241,26 @@ export default function DecisionBoardListScreen({ route, navigation }) {
               if (fullListing) listingPreviewCacheRef.current.set(String(listingId), fullListing);
             }
 
-            if (fullListing) {
-              nextListings[index] = {
-                ...boardListing,
-                listing: {
-                  ...(boardListing?.Listing || {}),
-                  ...(boardListing?.listing || {}),
-                  ...fullListing,
-                  ID: String(listingId),
-                },
-              };
-              changed = true;
-            }
-          } catch {}
-        }
+            return { boardListing, fullListing, listingId, previewIndex };
+          } catch {
+            return { boardListing, fullListing: null, previewIndex };
+          }
+        }));
+
+        previewResults.forEach(({ boardListing, fullListing, listingId, previewIndex }) => {
+          if (!fullListing) return;
+
+          nextListings[previewIndex] = {
+            ...boardListing,
+            listing: {
+              ...(boardListing?.Listing || {}),
+              ...(boardListing?.listing || {}),
+              ...fullListing,
+              ID: String(listingId),
+            },
+          };
+          changed = true;
+        });
 
         return changed ? { ...board, listings: nextListings } : board;
       }));
@@ -250,6 +291,17 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     }
   }, [createModalVisible, currentTier]);
 
+  const persistDecisionBoardLinkedListing = useCallback(async (listingId) => {
+    if (!listingId || !shouldLockDecisionBoardShortlist(currentTier)) return;
+
+    try {
+      const raw = await AsyncStorage.getItem(DECISION_BOARD_LINKED_SHORTLIST_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const next = Array.from(new Set([String(listingId), ...(Array.isArray(parsed) ? parsed.map((value) => String(value)) : [])]));
+      await AsyncStorage.setItem(DECISION_BOARD_LINKED_SHORTLIST_KEY, JSON.stringify(next));
+    } catch {}
+  }, [currentTier]);
+
   const addPendingListingToBoard = async (board) => {
     const listingId = getListingId(pendingListing);
     if (!listingId || !board?.id || savingBoardId) return;
@@ -262,7 +314,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
 
     setSavingBoardId(board.id);
     try {
-      await addDecisionBoardListing(board.id, {
+      const addedListing = await addDecisionBoardListing(board.id, {
         listingId,
         shortListListingId: pendingSource.shortListListingId,
         shortListId: pendingSource.shortListId,
@@ -270,10 +322,37 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         trafficLightStatus: 'Green',
         userVerdict: 'Maybe',
       });
-      const refreshedBoard = (await getDecisionBoards()).find((item) => item.id === board.id);
+      await persistDecisionBoardLinkedListing(listingId);
+      const nextListing = addedListing || {
+        id: `${board.id}-${listingId}`,
+        listingId,
+        listingStatus: 'Active',
+        trafficLightStatus: 'Green',
+        userVerdict: 'Maybe',
+      };
+
+      const updatedBoards = [
+        {
+          ...board,
+          listings: [nextListing, ...(board.listings || [])],
+        },
+        ...boards.filter((item) => String(item.id) !== String(board.id)),
+      ];
+
+      setBoards((current) => current.map((item) => (
+        String(item.id) === String(board.id)
+          ? { ...item, listings: [nextListing, ...(item.listings || [])] }
+          : item
+      )));
+      persistBoardsCache(updatedBoards);
+
       navigation.navigate('DecisionBoard', {
         decisionBoardId: board.id,
-        decisionBoard: refreshedBoard || board,
+        decisionBoard: {
+          ...board,
+          listings: [nextListing, ...(board.listings || [])],
+        },
+        propertyDeckId: pendingSource.propertyDeckId || null,
       });
     } catch (error) {
       Alert.alert('Property not added', error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Could not add this property to the DecisionBoard.');
@@ -327,7 +406,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
 
     setSavingBoardId('new');
     try {
-      const board = await createDecisionBoard({
+      let board = await createDecisionBoard({
         boardName: trimmedName,
         boardType,
         status: 'Active',
@@ -335,7 +414,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
       });
 
       if (pendingListing) {
-        await addDecisionBoardListing(board.id, {
+        const addedListing = await addDecisionBoardListing(board.id, {
           listingId: getListingId(pendingListing),
           shortListListingId: pendingSource.shortListListingId,
           shortListId: pendingSource.shortListId,
@@ -343,15 +422,35 @@ export default function DecisionBoardListScreen({ route, navigation }) {
           trafficLightStatus: 'Green',
           userVerdict: 'Maybe',
         });
+        await persistDecisionBoardLinkedListing(getListingId(pendingListing));
+
+        board = {
+          ...board,
+          listings: [addedListing || {
+            id: `${board.id}-${getListingId(pendingListing)}`,
+            listingId: getListingId(pendingListing),
+            listingStatus: 'Active',
+            trafficLightStatus: 'Green',
+            userVerdict: 'Maybe',
+          }, ...(board.listings || [])],
+        };
       }
 
       setCreateModalVisible(false);
       setBoardName('');
-      const nextBoards = await getDecisionBoards();
-      setBoards(nextBoards);
+      const updatedBoards = [
+        board,
+        ...boards.filter((item) => String(item.id) !== String(board.id)),
+      ];
+      setBoards((current) => [
+        board,
+        ...current.filter((item) => String(item.id) !== String(board.id)),
+      ]);
+      persistBoardsCache(updatedBoards);
       navigation.navigate('DecisionBoard', {
         decisionBoardId: board.id,
-        decisionBoard: nextBoards.find((item) => item.id === board.id) || board,
+        decisionBoard: board,
+        propertyDeckId: pendingSource.propertyDeckId || null,
       });
     } catch (error) {
       Alert.alert('Board not created', error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Could not create this DecisionBoard.');
@@ -371,7 +470,11 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         <View style={styles.boardCardBody}>
           <TouchableOpacity
             activeOpacity={0.9}
-            onPress={() => navigation.navigate('DecisionBoard', { decisionBoardId: item.id, decisionBoard: item })}
+            onPress={() => navigation.navigate('DecisionBoard', {
+              decisionBoardId: item.id,
+              decisionBoard: item,
+              propertyDeckId: pendingSource.propertyDeckId || null,
+            })}
           >
             <View style={styles.boardTopRow}>
               <View style={styles.boardIcon}>

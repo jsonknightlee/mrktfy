@@ -41,6 +41,7 @@ import {
 
 const APP_PURPLE = '#6366F1';
 const BUY_CHECKLIST_PROGRESS_KEY = 'mrktfy_buy_checklist_progress';
+const DECISION_BOARD_LINKED_SHORTLIST_KEY = 'mrktfy_decision_board_linked_shortlist';
 const SWIPE_THRESHOLD = 90;
 const RICH_FILTER_ENRICHMENT_MATCH_LIMIT = 20;
 const FLOW_STEPS = [
@@ -784,6 +785,9 @@ export default function PropertyDeckScreen({ route }) {
   const lastRichFilterEnrichmentKeyRef = useRef(null);
   const shortlistRemovalTimersRef = useRef(new Map());
   const loadedDeckContentIdRef = useRef(null);
+  const loadedDeckContentModeRef = useRef(null);
+  const deckListingsRef = useRef([]);
+  const decksRef = useRef([]);
   const buyScrollRef = useRef(null);
   const buyerAssistantSectionYRef = useRef(0);
   const buyerAssistantSuccessTimerRef = useRef(null);
@@ -808,11 +812,38 @@ export default function PropertyDeckScreen({ route }) {
   const [buyerAssistantSuccess, setBuyerAssistantSuccess] = useState('');
   const [buyerWorkspaceContext, setBuyerWorkspaceContext] = useState(null);
   const [buyChecklistProgress, setBuyChecklistProgress] = useState({});
+  const [decisionBoardLinkedListingIds, setDecisionBoardLinkedListingIds] = useState([]);
+
+  useEffect(() => {
+    deckListingsRef.current = deckListings;
+  }, [deckListings]);
+
+  useEffect(() => {
+    decksRef.current = decks;
+  }, [decks]);
 
   const deckLimit = getPropertyDeckLimit(currentTier);
   const deckLimitLabel = formatPropertyDeckLimit(deckLimit);
+  const decisionBoardLinkedListingIdSet = useMemo(() => (
+    new Set(decisionBoardLinkedListingIds.map((value) => String(value)))
+  ), [decisionBoardLinkedListingIds]);
   const selectedDeck = decks.find((deck) => String(deck.id) === String(selectedDeckId)) || null;
   const selectedShortlist = selectedDeck?.shortlist || [];
+  const shortlistListingIdSet = useMemo(() => {
+    const ids = new Set();
+
+    selectedShortlist.forEach((item) => {
+      const shortlistId = getListingId(item);
+      const linkedListingId = item.shortListListingId || item.ShortListListingId || item.ShortListListingID || item.shortlistListingId;
+      const propertyDeckListingId = item.propertyDeckListingId || item.PropertyDeckListingID;
+
+      if (shortlistId) ids.add(String(shortlistId));
+      if (linkedListingId) ids.add(String(linkedListingId));
+      if (propertyDeckListingId) ids.add(String(propertyDeckListingId));
+    });
+
+    return ids;
+  }, [selectedShortlist]);
   const hasYourFitRanks = selectedShortlist.some((listing) => getRankNumber(listing, 'yourFit') !== Number.POSITIVE_INFINITY);
   const activeShortlistSortMode = shortlistSortMode === 'yourFit' && hasYourFitRanks ? 'yourFit' : 'overall';
   const sortedShortlist = useMemo(() => (
@@ -852,8 +883,16 @@ export default function PropertyDeckScreen({ route }) {
   const activeDecks = decks.filter((deck) => !isDeckDeleted(deck));
   const deletedDecks = decks.filter(isDeckDeleted);
   const filteredDeckListings = useMemo(
-    () => deckListings.filter((listing) => listingPassesDeckFilters(listing, deckFilters)),
-    [deckFilters, deckListings]
+    () => deckListings.filter((listing) => {
+      const listingId = getListingId(listing);
+      const propertyDeckListingId = listing.propertyDeckListingId || listing.PropertyDeckListingID;
+
+      if (listingId && shortlistListingIdSet.has(String(listingId))) return false;
+      if (propertyDeckListingId && shortlistListingIdSet.has(String(propertyDeckListingId))) return false;
+
+      return listingPassesDeckFilters(listing, deckFilters);
+    }),
+    [deckFilters, deckListings, shortlistListingIdSet]
   );
   const currentListing = filteredDeckListings[currentIndex];
   const canCreateDeck = deckLimit > 0 && decks.length < deckLimit;
@@ -891,24 +930,32 @@ export default function PropertyDeckScreen({ route }) {
     setLoading(false);
   }, [selectedDeckId, userProfile]);
 
-  const loadSelectedDeck = useCallback(async (deckId) => {
+  const loadSelectedDeck = useCallback(async (deckId, requestedMode = 'detail') => {
     if (!deckId) return;
 
     let nextDecks = [];
     let nextListings = [];
     let nextShortlist = [];
     let deckSummary = null;
+    const isSameDeckAlreadyLoaded = loadedDeckContentIdRef.current === String(deckId);
 
     try {
-      nextDecks = await getPropertyDecks(userProfile);
-      deckSummary = nextDecks.find((deck) => String(deck.id) === String(deckId)) || null;
-      setDecks((currentDecks) => nextDecks.map((deck) => {
-        const currentDeck = currentDecks.find((item) => String(item.id) === String(deck.id));
-        const currentShortlist = Array.isArray(currentDeck?.shortlist) ? currentDeck.shortlist : [];
-        return currentShortlist.length
-          ? { ...deck, shortlist: currentShortlist, shortlistCount: currentShortlist.length }
-          : { ...deck, shortlist: currentDeck?.shortlist || [], shortlistCount: getDeckShortlistCount(deck) };
-      }));
+      const currentDecks = decksRef.current || [];
+
+      if (isSameDeckAlreadyLoaded && currentDecks.length) {
+        nextDecks = currentDecks;
+        deckSummary = currentDecks.find((deck) => String(deck.id) === String(deckId)) || null;
+      } else {
+        nextDecks = await getPropertyDecks(userProfile);
+        deckSummary = nextDecks.find((deck) => String(deck.id) === String(deckId)) || null;
+        setDecks((currentStateDecks) => nextDecks.map((deck) => {
+          const currentDeck = currentStateDecks.find((item) => String(item.id) === String(deck.id));
+          const currentShortlist = Array.isArray(currentDeck?.shortlist) ? currentDeck.shortlist : [];
+          return currentShortlist.length
+            ? { ...deck, shortlist: currentShortlist, shortlistCount: currentShortlist.length }
+            : { ...deck, shortlist: currentDeck?.shortlist || [], shortlistCount: getDeckShortlistCount(deck) };
+        }));
+      }
     } catch (error) {
       console.log('[PROPERTY-DECK] load selected deck list failed:', {
         deckId,
@@ -919,10 +966,18 @@ export default function PropertyDeckScreen({ route }) {
     }
 
     try {
-      [nextListings, nextShortlist] = await Promise.all([
-        getMatchedDeckListings(deckId, userProfile, deckSummary),
-        getShortlist(deckId, userProfile, deckSummary),
-      ]);
+      const currentDeckListings = deckListingsRef.current || [];
+      const canReuseCurrentListings = isSameDeckAlreadyLoaded && currentDeckListings.length > 0;
+
+      if (canReuseCurrentListings) {
+        nextListings = [...currentDeckListings];
+        nextShortlist = await getShortlist(deckId, userProfile, deckSummary);
+      } else {
+        [nextListings, nextShortlist] = await Promise.all([
+          getMatchedDeckListings(deckId, userProfile, deckSummary),
+          getShortlist(deckId, userProfile, deckSummary),
+        ]);
+      }
     } catch (error) {
       console.log('[PROPERTY-DECK] load selected deck content failed:', {
         deckId,
@@ -945,15 +1000,33 @@ export default function PropertyDeckScreen({ route }) {
     }));
     setDeckListings(nextListings);
     loadedDeckContentIdRef.current = String(deckId);
+    loadedDeckContentModeRef.current = `${String(deckId)}:${requestedMode}`;
     lastRichFilterEnrichmentKeyRef.current = null;
     setCurrentIndex(0);
     pan.setValue({ x: 0, y: 0 });
   }, [pan, userProfile]);
 
+  const loadDecisionBoardLinkedShortlist = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(DECISION_BOARD_LINKED_SHORTLIST_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setDecisionBoardLinkedListingIds(Array.isArray(parsed) ? parsed.map((value) => String(value)).filter(Boolean) : []);
+    } catch {
+      setDecisionBoardLinkedListingIds([]);
+    }
+  }, []);
+
   useEffect(() => {
     setCurrentIndex(0);
     pan.setValue({ x: 0, y: 0 });
   }, [deckFilters, pan]);
+
+  useEffect(() => {
+    if (!filteredDeckListings.length) return;
+    if (currentIndex < filteredDeckListings.length) return;
+
+    setCurrentIndex(filteredDeckListings.length - 1);
+  }, [currentIndex, filteredDeckListings.length]);
 
   useEffect(() => () => {
     shortlistRemovalTimersRef.current.forEach((timer) => clearTimeout(timer));
@@ -962,6 +1035,12 @@ export default function PropertyDeckScreen({ route }) {
       clearTimeout(buyerAssistantSuccessTimerRef.current);
     }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDecisionBoardLinkedShortlist();
+    }, [loadDecisionBoardLinkedShortlist])
+  );
 
   useEffect(() => {
     if (
@@ -1057,7 +1136,7 @@ export default function PropertyDeckScreen({ route }) {
         handledOpenDeckIdRef.current = routeOpenKey;
         setSelectedDeckId(routeDeckId);
         setMode(routeOpenMode);
-        loadSelectedDeck(routeDeckId);
+        loadSelectedDeck(routeDeckId, routeOpenMode);
         navigation.setParams?.({ openDeckId: undefined, openMode: undefined, buyerWorkspaceContext: undefined });
         return;
       }
@@ -1068,8 +1147,8 @@ export default function PropertyDeckScreen({ route }) {
       }
 
       if ((mode === 'detail' || mode === 'shortlist') && selectedDeckId) {
-        if (loadedDeckContentIdRef.current !== String(selectedDeckId)) {
-          loadSelectedDeck(selectedDeckId);
+        if (loadedDeckContentModeRef.current !== `${String(selectedDeckId)}:${mode}`) {
+          loadSelectedDeck(selectedDeckId, mode);
         }
       } else {
         loadDecks();
@@ -1095,8 +1174,8 @@ export default function PropertyDeckScreen({ route }) {
   const openDeck = async (deckId) => {
     setSelectedDeckId(deckId);
     setMode('detail');
-    if (loadedDeckContentIdRef.current !== String(deckId)) {
-      await loadSelectedDeck(deckId);
+    if (loadedDeckContentModeRef.current !== `${String(deckId)}:detail`) {
+      await loadSelectedDeck(deckId, 'detail');
     }
   };
 
@@ -1272,7 +1351,7 @@ export default function PropertyDeckScreen({ route }) {
       useNativeDriver: true,
     }).start(() => {
       pan.setValue({ x: 0, y: 0 });
-      setCurrentIndex((index) => index + 1);
+      setCurrentIndex((index) => (direction === 'right' ? index : index + 1));
       setPreviewListing(null);
       isProcessingRef.current = false;
     });
@@ -1424,6 +1503,7 @@ export default function PropertyDeckScreen({ route }) {
     navigation.navigate('DecisionBoards', {
       pendingListing: listing,
       pendingSource: {
+        propertyDeckId: selectedDeckId || undefined,
         shortListListingId: listing.shortListListingId || listing.ShortListListingId || listing.ShortListListingID || listing.shortlistListingId,
         shortListId: listing.shortListId || listing.ShortListID,
         sourceFlow: 'propertyDeck',
@@ -1823,6 +1903,9 @@ export default function PropertyDeckScreen({ route }) {
       .filter(Boolean)
       .join(' / ');
     const distanceText = formatSearchDistance(item);
+    const currentTierKey = String(currentTier || 'free').toLowerCase();
+    const isBuyerTier = ['free', 'prospector'].includes(currentTierKey);
+    const isDecisionBoardLocked = isBuyerTier && listingId && decisionBoardLinkedListingIdSet.has(String(listingId));
 
     return (
       <TouchableOpacity
@@ -1867,11 +1950,22 @@ export default function PropertyDeckScreen({ route }) {
           )}
           {!isPendingRemoval && (
             <TouchableOpacity
-              style={styles.shortlistDecisionButton}
+              style={[
+                styles.shortlistDecisionButton,
+                isDecisionBoardLocked && styles.shortlistDecisionButtonDisabled,
+              ]}
               onPress={() => openDecisionBoard(item)}
+              disabled={isDecisionBoardLocked}
             >
               <Ionicons name="git-branch-outline" size={16} color={APP_PURPLE} />
-              <Text style={styles.shortlistDecisionButtonText}>Add to Decision Board</Text>
+              <Text
+                style={[
+                  styles.shortlistDecisionButtonText,
+                  isDecisionBoardLocked && styles.shortlistDecisionButtonTextDisabled,
+                ]}
+              >
+                {isDecisionBoardLocked ? 'Added to Decision Board' : 'Add to Decision Board'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -4094,11 +4188,17 @@ const styles = StyleSheet.create({
     minHeight: 34,
     paddingHorizontal: 10,
   },
+  shortlistDecisionButtonDisabled: {
+    backgroundColor: '#E2E8F0',
+  },
   shortlistDecisionButtonText: {
     color: APP_PURPLE,
     fontSize: 12,
     fontWeight: '900',
     marginLeft: 6,
+  },
+  shortlistDecisionButtonTextDisabled: {
+    color: '#64748B',
   },
   removeButton: {
     alignItems: 'center',

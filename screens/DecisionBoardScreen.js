@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -227,6 +227,21 @@ export default function DecisionBoardScreen({ route, navigation }) {
   const activeFlowIndex = FLOW_STEPS.findIndex((step) => step.key === ACTIVE_FLOW_STEP);
   const boardPropertyDeckId = board?.propertyDeckId || board?.PropertyDeckID || board?.PropertyDeckId || route.params?.propertyDeckId || null;
 
+  const goBackToDeck = useCallback(() => {
+    if (boardPropertyDeckId) {
+      navigation.navigate('Tabs', {
+        screen: 'Deck',
+        params: {
+          openDeckId: boardPropertyDeckId,
+          openMode: 'detail',
+        },
+      });
+      return;
+    }
+
+    navigation.goBack();
+  }, [boardPropertyDeckId, navigation]);
+
   const loadBoard = useCallback(async () => {
     if (!decisionBoardId) return;
 
@@ -240,13 +255,11 @@ export default function DecisionBoardScreen({ route, navigation }) {
     }
   }, [decisionBoardId]);
 
-  useEffect(() => {
-    loadBoard();
-  }, [loadBoard]);
-
   useFocusEffect(useCallback(() => {
-    loadBoard();
-  }, [loadBoard]));
+    if (!initialBoard && decisionBoardId) {
+      loadBoard();
+    }
+  }, [decisionBoardId, initialBoard, loadBoard]));
 
   const setBoardStatus = async (status) => {
     if (!board?.id) return;
@@ -658,7 +671,7 @@ export default function DecisionBoardScreen({ route, navigation }) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerIconButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.headerIconButton} onPress={goBackToDeck}>
           <Ionicons name="arrow-back" size={22} color="#111827" />
         </TouchableOpacity>
         <View style={styles.headerText}>
