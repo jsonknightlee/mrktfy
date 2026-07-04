@@ -1,5 +1,5 @@
 // screens/auth/RegisterScreen.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { registerUser, loginWithGoogle, loginWithApple, fetchUserProfile } from '../../services/authApi';
 import { saveToken } from '../../utils/tokenStorage';
@@ -21,16 +21,22 @@ export default function RegisterScreen({ navigation }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
-  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
+  const baseGoogleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
     || '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com';
+  const androidGoogleClientId = process.env.EXPO_PUBLIC_ANDROID_GOOGLE_CLIENT_ID || baseGoogleClientId;
+  const iosGoogleClientId = process.env.EXPO_PUBLIC_IOS_GOOGLE_CLIENT_ID || baseGoogleClientId;
 
   // --- Google Auth ---
+  const androidNativeRedirectUri = useMemo(() => {
+    if (!androidGoogleClientId) return undefined;
+    return `com.googleusercontent.apps.${androidGoogleClientId.replace('.apps.googleusercontent.com', '')}:/oauthredirect`;
+  }, [androidGoogleClientId]);
+
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: googleClientId,
-    iosClientId: googleClientId,
-    androidClientId: googleClientId,
-    webClientId: googleClientId,
+    iosClientId: iosGoogleClientId,
+    androidClientId: androidGoogleClientId,
     scopes: ['openid', 'profile', 'email'],
+    redirectUri: Platform.OS === 'android' ? androidNativeRedirectUri : undefined,
   });
 
   useEffect(() => {
@@ -178,7 +184,13 @@ export default function RegisterScreen({ navigation }) {
 
       <TouchableOpacity
         style={styles.oauthBtn}
-        onPress={() => !submitting && request && promptAsync()}
+        onPress={() =>
+          !submitting
+          && request
+          && promptAsync({
+            useProxy: false,
+            redirectUri: Platform.OS === 'android' ? androidNativeRedirectUri : undefined,
+          })}
         disabled={submitting || !request}
       >
         <Ionicons name="logo-google" size={20} color="#fff" style={{ marginRight: 8 }} />

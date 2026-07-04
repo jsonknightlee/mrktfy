@@ -11,8 +11,20 @@
         "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
         "EXPO_PUBLIC_APP_ENV": "development",
         "EXPO_PUBLIC_DEBUG_MODE": "true",
-        "EXPO_PUBLIC_GOOGLE_CLIENT_ID": "771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com",
-        "EXPO_PUBLIC_APPLE_CLIENT_ID": "com.mrktfy.mrktfy.dev"
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAKFj0CZ25nbVm5Y_HHsfJPGcXREH8LLN4"
+      },
+      "ios": {
+        "env": {
+          "EXPO_PUBLIC_GOOGLE_CLIENT_ID": "771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com",
+          "EXPO_PUBLIC_APPLE_CLIENT_ID": "com.mrktfy.mrktfy.dev"
+        }
+      },
+      "android": {
+        "env": {
+          "EXPO_PUBLIC_GOOGLE_CLIENT_ID": "771793399175-p7vrjnt16cu5tjaefemv8t65v1at1jmj.apps.googleusercontent.com",
+          "EXPO_PUBLIC_APPLE_CLIENT_ID": "com.mrktfy.mrktfy.dev",
+          "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAKFj0CZ25nbVm5Y_HHsfJPGcXREH8LLN4"
+        }
       }
     },
     "preview": {
@@ -20,7 +32,8 @@
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.38:3001",
         "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
-        "EXPO_PUBLIC_APP_ENV": "development"
+        "EXPO_PUBLIC_APP_ENV": "development",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAKFj0CZ25nbVm5Y_HHsfJPGcXREH8LLN4"
       }
     },
     "production": {
@@ -30,7 +43,8 @@
         "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
         "EXPO_PUBLIC_APP_ENV": "production",
         "EXPO_PUBLIC_GOOGLE_CLIENT_ID": "771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com",
-        "EXPO_PUBLIC_APPLE_CLIENT_ID": "com.mrktfy.mrktfy"
+        "EXPO_PUBLIC_APPLE_CLIENT_ID": "com.mrktfy.mrktfy",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAKFj0CZ25nbVm5Y_HHsfJPGcXREH8LLN4"
       }
     }
   },

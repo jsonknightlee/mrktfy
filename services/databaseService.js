@@ -40,9 +40,13 @@ class DatabaseService {
 
   // Generic API request helper using axios
   async apiRequest(endpoint, options = {}) {
-    const fullUrl = `${this.baseURL}/${endpoint.replace(/^\//, '')}`;
+    const sanitizedEndpoint = typeof endpoint === 'string'
+      ? endpoint.replace(/^\//, '')
+      : '';
+    const relativePath = `/${sanitizedEndpoint}`.replace(/\/+/g, '/');
+    const fullUrl = `${this.baseURL}${relativePath}`;
     const requestConfig = {
-      url: endpoint,
+      url: relativePath,
       method: options.method || 'GET',
       data: options.body ? JSON.parse(options.body) : undefined,
       headers: {
@@ -62,13 +66,13 @@ class DatabaseService {
       console.log('🌐 Database Service - About to make axios request:', fullUrl);
       console.log('🌐 Database Service - Request config:', {
         method: options.method || 'GET',
-        url: endpoint,
+        url: relativePath,
         data: options.body ? JSON.parse(options.body) : undefined,
         headers: this.axiosInstance.defaults.headers
       });
       
       console.log('🌐 Database Service - EXACT REQUEST BEING SENT:');
-      console.log('🌐 - URL:', `${this.baseURL}/${endpoint}`);
+      console.log('🌐 - URL:', fullUrl);
       console.log('🌐 - Method:', requestConfig.method);
       console.log('🌐 - Headers:', JSON.stringify(requestConfig.headers, null, 2));
       console.log('🌐 - Data:', requestConfig.data || 'None');

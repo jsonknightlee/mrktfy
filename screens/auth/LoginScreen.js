@@ -1,6 +1,17 @@
 // screens/auth/LoginScreen.js
-import React, { useContext, useEffect, useState } from 'react';
-import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  TextInput,
+  Alert,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Platform,
+  ActivityIndicator,
+  Linking,
+} from 'react-native';
+import Constants from 'expo-constants';
 import { loginUser, fetchUserProfile, loginWithGoogle, loginWithApple } from '../../services/authApi';
 import { AuthContext } from '../../contexts/AuthContext';
 
@@ -17,27 +28,69 @@ export default function LoginScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
   const [oauthLoading, setOauthLoading] = useState('');
   const { signIn, setIsLoggedIn } = useContext(AuthContext);
-  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
+  const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
+  const baseGoogleClientId = extra.GOOGLE_CLIENT_ID
+    || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
     || '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com';
+  const androidGoogleClientId = extra.ANDROID_GOOGLE_CLIENT_ID
+    || process.env.EXPO_PUBLIC_ANDROID_GOOGLE_CLIENT_ID
+    || baseGoogleClientId;
+  const iosGoogleClientId = extra.IOS_GOOGLE_CLIENT_ID
+    || process.env.EXPO_PUBLIC_IOS_GOOGLE_CLIENT_ID
+    || baseGoogleClientId;
+
+  const androidNativeRedirectUri = useMemo(() => {
+    if (!androidGoogleClientId) return undefined;
+    const scheme = `com.googleusercontent.apps.${androidGoogleClientId.replace('.apps.googleusercontent.com', '')}`;
+    const uri = `${scheme}:/oauthredirect`;
+    console.log('🔍 [GOOGLE] Computed native redirect URI:', uri);
+    return uri;
+  }, [androidGoogleClientId]);
 
   const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
-    expoClientId: googleClientId,
-    iosClientId: googleClientId,
-    androidClientId: googleClientId,
-    webClientId: googleClientId,
+    iosClientId: iosGoogleClientId,
+    androidClientId: androidGoogleClientId,
     scopes: ['openid', 'profile', 'email'],
+    redirectUri: Platform.OS === 'android' ? androidNativeRedirectUri : undefined,
   });
 
   useEffect(() => {
+    if (Platform.OS !== 'android' || !androidNativeRedirectUri) return;
+
+    Linking.canOpenURL(androidNativeRedirectUri)
+      .then((canOpen) => {
+        console.log('🔍 [GOOGLE] canOpenURL for native redirect:', canOpen);
+      })
+      .catch((err) => {
+        console.log('⚠️ [GOOGLE] canOpenURL check failed:', err?.message ?? err);
+      });
+  }, [androidNativeRedirectUri]);
+
+  useEffect(() => {
+    if (googleRequest) {
+      console.log('🔍 [GOOGLE] Hook redirect URI:', googleRequest.redirectUri);
+      console.log('🔍 [GOOGLE] Hook discovery:', googleRequest.discovery);
+    } else {
+      console.log('⚠️ [GOOGLE] Hook redirect URI unavailable yet');
+    }
+  }, [googleRequest]);
+
+  useEffect(() => {
+    if (googleResponse) {
+      console.log('🔍 [GOOGLE] Hook response type:', googleResponse.type);
+    }
+
     const completeGoogleSignIn = async () => {
       if (googleResponse?.type !== 'success') return;
 
       try {
+        console.log('🔍 [GOOGLE] Redirect URI:', googleRequest?.redirectUri);
         const accessToken = googleResponse.authentication?.accessToken;
         if (!accessToken) {
           throw new Error('Google did not return an access token.');
         }
 
+        console.log('🔍 [GOOGLE] Got access token, calling backend');
         const token = await loginWithGoogle(accessToken);
         const user = await fetchUserProfile(token);
         Alert.alert('Welcome', `Hello ${user.Firstname || user.Name || 'there'}!`);
@@ -116,11 +169,21 @@ export default function LoginScreen({ navigation }) {
     try {
       console.log('🔍 [GOOGLE] Starting sign-in...');
 
-      if (!googleClientId) {
+      const activeGoogleClientId = Platform.OS === 'android' ? androidGoogleClientId : iosGoogleClientId;
+      console.log('🔍 [GOOGLE] Using client ID:', activeGoogleClientId || baseGoogleClientId);
+
+      if (!activeGoogleClientId) {
         throw new Error('Missing Google OAuth client ID.');
       }
 
-      const result = await promptGoogleAsync();
+      const result = await promptGoogleAsync({
+        useProxy: false,
+        redirectUri: Platform.OS === 'android' ? androidNativeRedirectUri : undefined,
+      });
+      console.log('🔍 [GOOGLE] promptAsync result type:', result.type);
+      console.log('🔍 [GOOGLE] promptAsync error:', result.error);
+      console.log('🔍 [GOOGLE] promptAsync params:', result.params);
+      console.log('🔍 [GOOGLE] promptAsync url:', result.url);
       if (result.type !== 'success') setOauthLoading('');
     } catch (err) {
       console.error('❌ [GOOGLE] Unexpected error:', err);

@@ -96,6 +96,9 @@ android {
         versionName "1.0.9"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        manifestPlaceholders = [
+            GOOGLE_MAPS_API_KEY: System.getenv('EXPO_PUBLIC_GOOGLE_MAPS_API_KEY') ?: ""
+        ]
     }
     signingConfigs {
         debug {
