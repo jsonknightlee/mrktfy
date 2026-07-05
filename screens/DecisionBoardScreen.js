@@ -226,14 +226,13 @@ export default function DecisionBoardScreen({ route, navigation }) {
     : `${contactModal.item ? 'Edit' : 'Add'} broker`;
   const activeFlowIndex = FLOW_STEPS.findIndex((step) => step.key === ACTIVE_FLOW_STEP);
   const boardPropertyDeckId = board?.propertyDeckId || board?.PropertyDeckID || board?.PropertyDeckId || route.params?.propertyDeckId || null;
-
-  const goBackToDeck = useCallback(() => {
+  const goBackToBoardList = useCallback(() => {
     if (boardPropertyDeckId) {
       navigation.navigate('Tabs', {
         screen: 'Deck',
         params: {
           openDeckId: boardPropertyDeckId,
-          openMode: 'detail',
+          openMode: 'shortlist',
         },
       });
       return;
@@ -265,16 +264,26 @@ export default function DecisionBoardScreen({ route, navigation }) {
     if (!board?.id) return;
 
     setSaving(true);
+    const previousStatus = board.status;
+    setBoard((current) => ({
+      ...current,
+      status,
+    }));
     try {
       const updated = await updateDecisionBoard(board.id, { status });
       setBoard((current) => ({
         ...current,
         ...updated,
+        status: updated?.status || updated?.Status || status,
         listings: updated?.listings?.length ? updated.listings : current?.listings || [],
         agents: updated?.agents?.length ? updated.agents : current?.agents || [],
         brokers: updated?.brokers?.length ? updated.brokers : current?.brokers || [],
       }));
     } catch (error) {
+      setBoard((current) => ({
+        ...current,
+        status: previousStatus,
+      }));
       Alert.alert('Status update failed', error?.response?.data?.error || error?.message || 'Could not update board status.');
     } finally {
       setSaving(false);
@@ -671,7 +680,7 @@ export default function DecisionBoardScreen({ route, navigation }) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerIconButton} onPress={goBackToDeck}>
+        <TouchableOpacity style={styles.headerIconButton} onPress={goBackToBoardList}>
           <Ionicons name="arrow-back" size={22} color="#111827" />
         </TouchableOpacity>
         <View style={styles.headerText}>
