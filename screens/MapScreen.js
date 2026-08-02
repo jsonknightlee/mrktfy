@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Modal,
-  ScrollView, Animated, TouchableWithoutFeedback, TextInput, Switch
+  ScrollView, Animated, TouchableWithoutFeedback, TextInput, Switch,
+  ActivityIndicator,
 } from 'react-native';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -103,6 +104,8 @@ export default function MapScreen() {
   const [searchLocationHistory, setSearchLocationHistory] = useState([]);
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [locationSearchReady, setLocationSearchReady] = useState(false);
+  const [isCreatingDeck, setIsCreatingDeck] = useState(false);
+  const [listingsLoading, setListingsLoading] = useState(false);
 
   // Wheel state (we avoid re-render during scroll)
   const minIndexRef = useRef(0);
@@ -167,6 +170,17 @@ export default function MapScreen() {
     ? getSearchLocationLabel(searchLocation)
     : 'Current location';
 
+  // Zoom the initial map view out enough to comfortably fit the full
+  // subscription search-radius circle (bigger tiers = wider radius = more zoomed out).
+  const mapInitialDelta = useMemo(() => {
+    const radiusKm = getMaxSearchRadius() || 2;
+    const paddingMultiplier = 2.6; // extra breathing room around the radius circle
+    const latitudeDelta = (radiusKm * 2 * paddingMultiplier) / 111;
+    const latitudeForLongitude = activeSearchLocation?.latitude ?? userLocation?.latitude ?? 0;
+    const longitudeDelta = latitudeDelta / Math.max(Math.cos((latitudeForLongitude * Math.PI) / 180), 0.1);
+    return { latitudeDelta, longitudeDelta };
+  }, [currentTier, activeSearchLocation?.latitude, userLocation?.latitude]);
+
   const getListingPinColor = (listing) => {
     const status = getFavoriteStatus(listing.ID);
     if (status.isFavorited) return APP_PURPLE;
@@ -225,6 +239,7 @@ export default function MapScreen() {
     setSelectedListing(null);
     setListings([]);
     setFilteredListings([]);
+    setListingsLoading(true);
 
     try {
       const searchRadius = getMaxSearchRadius();
@@ -246,6 +261,10 @@ export default function MapScreen() {
         console.log('Error fallback to London, found:', londonNearby.length, 'listings');
       } catch (fallbackErr) {
         console.error('London fallback also failed:', fallbackErr);
+      }
+    } finally {
+      if (requestSeq === listingsRequestSeqRef.current) {
+        setListingsLoading(false);
       }
     }
   };
@@ -343,51 +362,74 @@ export default function MapScreen() {
 
   // fetch listings by type and active search location
   useEffect(() => {
-    (async () => {
-      setLocationSearchReady(false);
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.warn('Location permission denied');
-        setLocationSearchReady(true);
-        return;
-      }
+    // Subscription tier is still resolving (e.g. just after login) - wait for
+    // it to settle so we don't fetch with a stale/default tier and radius,
+    // then immediately re-fetch once the real tier arrives.
+    if (loading) return undefined;
 
-      try {
-        const loc = await Location.getCurrentPositionAsync({});
-        const { latitude, longitude } = loc.coords;
-        const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
+    let cancelled = false;
 
-        let savedSearchLocation = null;
-        if (canUseSearchLocation(currentTier)) {
-          try {
-            const savedValue = await AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY);
-            savedSearchLocation = savedValue ? JSON.parse(savedValue) : null;
-          } catch {}
-        } else {
-          await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
-          setSearchLocation(null);
-          setSearchLocationInputVisible(false);
+    // Small debounce: if `currentTier`/`isRental` change again in quick
+    // succession (e.g. subscription context flips loading true->false twice
+    // in a row), collapse everything into a single actual network fetch
+    // instead of firing one request per intermediate value.
+    const debounceId = setTimeout(() => {
+      (async () => {
+        setLocationSearchReady(false);
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (cancelled) return;
+        if (status !== 'granted') {
+          console.warn('Location permission denied');
+          setLocationSearchReady(true);
+          return;
         }
 
-        if (savedSearchLocation?.latitude && savedSearchLocation?.longitude) {
-          setSearchLocation(savedSearchLocation);
-          if (!searchLocationQuery) {
-            setSearchLocationQuery(savedSearchLocation.query || savedSearchLocation.label || '');
+        try {
+          const loc = await Location.getCurrentPositionAsync({});
+          if (cancelled) return;
+          const { latitude, longitude } = loc.coords;
+          const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
+
+          let savedSearchLocation = null;
+          if (canUseSearchLocation(currentTier)) {
+            try {
+              const savedValue = await AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY);
+              savedSearchLocation = savedValue ? JSON.parse(savedValue) : null;
+            } catch {}
+          } else {
+            await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
+            setSearchLocation(null);
+            setSearchLocationInputVisible(false);
           }
+
+          if (cancelled) return;
+
+          if (savedSearchLocation?.latitude && savedSearchLocation?.longitude) {
+            setSearchLocation(savedSearchLocation);
+            if (!searchLocationQuery) {
+              setSearchLocationQuery(savedSearchLocation.query || savedSearchLocation.label || '');
+            }
+          }
+
+          setUserLocation(nextUserLocation);
+
+          const locationForSearch = savedSearchLocation?.latitude && canUseSearchLocation(currentTier)
+            ? savedSearchLocation
+            : nextUserLocation;
+
+          if (cancelled) return;
+          await loadListingsForLocation(locationForSearch, isRental ? TYPE_RENT : TYPE_SALE);
+        } finally {
+          if (!cancelled) setLocationSearchReady(true);
         }
+      })();
+    }, 250);
 
-        setUserLocation(nextUserLocation);
-
-        const locationForSearch = savedSearchLocation?.latitude && canUseSearchLocation(currentTier)
-          ? savedSearchLocation
-          : nextUserLocation;
-
-        await loadListingsForLocation(locationForSearch, isRental ? TYPE_RENT : TYPE_SALE);
-      } finally {
-        setLocationSearchReady(true);
-      }
-    })();
-  }, [isRental, currentTier]);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounceId);
+    };
+  }, [isRental, currentTier, loading]);
 
   useEffect(() => {
     if (!userLocation || !searchLocationEnabled || searchLocation) return;
@@ -503,6 +545,10 @@ export default function MapScreen() {
   };
 
   const handleCreatePropertyDeck = async () => {
+    if (isCreatingDeck) {
+      return;
+    }
+
     const deckLimit = getPropertyDeckLimit(currentTier);
     if (deckLimit <= 0) {
       navigation.navigate('Subscription');
@@ -515,61 +561,78 @@ export default function MapScreen() {
       return;
     }
 
-    const existingDecks = await getPropertyDecks(userProfile);
-    if (existingDecks.length >= deckLimit) {
-      showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
-      return;
-    }
+    setIsCreatingDeck(true);
 
-    const searchRadiusKm = getMaxSearchRadius();
-    const deckSearchLocation = activeSearchLocation || userLocation;
-    const filterJson = {
-      listingType: isRental ? TYPE_RENT : TYPE_SALE,
-      radiusKm: searchRadiusKm,
-      minPrice: filters.minPrice,
-      maxPrice: filters.maxPrice,
-      beds: filters.beds || null,
-      baths: filters.baths || null,
-      latitude: deckSearchLocation?.latitude || null,
-      longitude: deckSearchLocation?.longitude || null,
-      searchLocationLabel: activeSearchLocationLabel,
-      searchLocationSource: searchLocationEnabled && searchLocation ? 'search' : 'user',
-      searchLocationQuery: searchLocationEnabled && searchLocation ? searchLocation.query || searchLocation.label || null : null,
-    };
-
-    let deckCreationResult;
     try {
-      deckCreationResult = await createPropertyDeckFromListings({
-        userProfile,
-        limit: deckLimit,
-        listings: sourceListings,
-        filterJson,
+      const existingDecks = await getPropertyDecks(userProfile);
+      if (existingDecks.length >= deckLimit) {
+        showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
+        return;
+      }
+
+      const searchRadiusKm = getMaxSearchRadius();
+      const deckSearchLocation = activeSearchLocation || userLocation;
+      const filterJson = {
+        listingType: isRental ? TYPE_RENT : TYPE_SALE,
+        radiusKm: searchRadiusKm,
+        minPrice: filters.minPrice,
+        maxPrice: filters.maxPrice,
+        beds: filters.beds || null,
+        baths: filters.baths || null,
+        latitude: deckSearchLocation?.latitude || null,
+        longitude: deckSearchLocation?.longitude || null,
+        searchLocationLabel: activeSearchLocationLabel,
+        searchLocationSource: searchLocationEnabled && searchLocation ? 'search' : 'user',
+        searchLocationQuery: searchLocationEnabled && searchLocation ? searchLocation.query || searchLocation.label || null : null,
+      };
+
+      let deckCreationResult;
+      try {
+        deckCreationResult = await createPropertyDeckFromListings({
+          userProfile,
+          limit: deckLimit,
+          listings: sourceListings,
+          filterJson,
+        });
+      } catch (error) {
+        const status = error?.response?.status;
+        const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
+        showToast(backendMessage || `Property Deck creation failed${status ? ` (${status})` : ''}.`);
+        return;
+      }
+
+      const nextDecks = Array.isArray(deckCreationResult)
+        ? deckCreationResult
+        : deckCreationResult?.decks || [];
+      const createdDeck = deckCreationResult?.createdDeck || nextDecks.find((deck) => !existingDecks.some((existingDeck) => existingDeck.id === deck.id));
+      if (!createdDeck) {
+        showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
+        return;
+      }
+
+      console.log('[PROPERTY-DECK] navigating to created deck:', {
+        deckId: createdDeck.id,
+        deckListingCount: createdDeck.deckListingCount,
+      });
+
+      navigation.navigate('Deck', {
+        openDeckId: createdDeck.id,
+        openMode: 'detail',
+        createdFromMap: true,
       });
     } catch (error) {
-      const status = error?.response?.status;
-      const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
-      showToast(backendMessage || `Property Deck creation failed${status ? ` (${status})` : ''}.`);
-      return;
+      console.log('[PROPERTY-DECK] create from map failed:', {
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+
+      if (!error?.response?.data?.message && !error?.response?.data?.error) {
+        showToast('Property Deck creation failed. Please try again.');
+      }
+    } finally {
+      setIsCreatingDeck(false);
     }
-
-    const nextDecks = Array.isArray(deckCreationResult)
-      ? deckCreationResult
-      : deckCreationResult?.decks || [];
-    const createdDeck = deckCreationResult?.createdDeck || nextDecks.find((deck) => !existingDecks.some((existingDeck) => existingDeck.id === deck.id));
-    if (!createdDeck) {
-      showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
-      return;
-    }
-
-    console.log('[PROPERTY-DECK] navigating to created deck:', {
-      deckId: createdDeck.id,
-      deckListingCount: createdDeck.deckListingCount,
-    });
-
-    navigation.navigate('Deck', {
-      openDeckId: createdDeck.id,
-      createdFromMap: true,
-    });
   };
 
   const handleFavoriteToggleWithAd = (listingId) => {
@@ -618,6 +681,13 @@ export default function MapScreen() {
       <TouchableOpacity style={styles.filterBtn} onPress={() => setFilterModalVisible(true)}>
         <Ionicons name="filter" size={24} color="black" />
       </TouchableOpacity>
+
+      {listingsLoading && (
+        <View style={styles.listingsLoadingPill} pointerEvents="none">
+          <ActivityIndicator size="small" color="#FFFFFF" />
+          <Text style={styles.listingsLoadingPillText}>Finding properties…</Text>
+        </View>
+      )}
 
       {searchLocationEnabled && (
         <View style={styles.searchLocationPanel}>
@@ -698,7 +768,12 @@ export default function MapScreen() {
         </View>
       )}
 
-      <TouchableOpacity style={styles.createDeckOuter} onPress={handleCreatePropertyDeck} activeOpacity={0.9}>
+      <TouchableOpacity
+        style={[styles.createDeckOuter, isCreatingDeck && styles.createDeckOuterDisabled]}
+        onPress={handleCreatePropertyDeck}
+        activeOpacity={0.9}
+        disabled={isCreatingDeck}
+      >
         <Animated.View
           pointerEvents="none"
           style={[
@@ -714,9 +789,15 @@ export default function MapScreen() {
           ]}
         />
         <View style={styles.createDeckBtn}>
-          <Text style={styles.createDeckBtnText}>Create</Text>
-          <View style={styles.createDeckIconWrap}>
-            <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+          <Text style={[styles.createDeckBtnText, isCreatingDeck && styles.createDeckBtnTextDisabled]}>
+            {isCreatingDeck ? 'Creating…' : 'Create'}
+          </Text>
+          <View style={[styles.createDeckIconWrap, isCreatingDeck && styles.createDeckIconWrapDisabled]}>
+            {isCreatingDeck ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            )}
           </View>
         </View>
       </TouchableOpacity>
@@ -740,8 +821,8 @@ export default function MapScreen() {
           initialRegion={{
             latitude: activeSearchLocation?.latitude || userLocation.latitude,
             longitude: activeSearchLocation?.longitude || userLocation.longitude,
-            latitudeDelta: 0.05,
-            longitudeDelta: 0.05,
+            latitudeDelta: mapInitialDelta.latitudeDelta,
+            longitudeDelta: mapInitialDelta.longitudeDelta,
           }}
           onPress={() => {
             if (Date.now() < suppressMapPressUntilRef.current) return;
@@ -1147,6 +1228,25 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 50, left: 20, zIndex: 10,
     backgroundColor: 'white', padding: 10, borderRadius: 20, elevation: 3
   },
+  listingsLoadingPill: {
+    position: 'absolute',
+    top: 56,
+    alignSelf: 'center',
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(17,24,39,0.85)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    elevation: 4,
+  },
+  listingsLoadingPillText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
   searchLocationPanel: {
     left: 20,
     position: 'absolute',
@@ -1315,6 +1415,9 @@ const styles = StyleSheet.create({
     shadowRadius: 9,
     shadowOffset: { width: 0, height: 4 },
   },
+  createDeckOuterDisabled: {
+    opacity: 0.7,
+  },
   createDeckRainbow: {
     position: 'absolute',
     width: 150,
@@ -1343,6 +1446,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginRight: 7,
   },
+  createDeckBtnTextDisabled: {
+    color: '#D1D5DB',
+  },
   createDeckIconWrap: {
     alignItems: 'center',
     backgroundColor: APP_PURPLE,
@@ -1350,6 +1456,9 @@ const styles = StyleSheet.create({
     height: 30,
     justifyContent: 'center',
     width: 30,
+  },
+  createDeckIconWrapDisabled: {
+    backgroundColor: '#4F46E5',
   },
   card: {
     position: 'absolute', bottom: 30, left: 20, right: 20,

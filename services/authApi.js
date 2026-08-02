@@ -1,4 +1,5 @@
 // services/authApi.js
+import Constants from 'expo-constants';
 import { authApi } from './api';
 
 export const fetchUserProfile = async (token) => {
@@ -26,5 +27,20 @@ export const loginWithGoogle = async (accessToken) => {
 
 export const loginWithApple = async (identityToken, fullName) => {
   const { data } = await authApi.post('/apple', { identityToken, fullName });
+  return data.token ?? data;
+};
+
+const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
+
+export const isTestLoginEnabled = () => Boolean(extra.ENABLE_TEST_LOGIN && extra.TEST_LOGIN_SECRET);
+
+// Dev-only bypass: backend must gate /auth/test-login behind the same shared
+// secret and refuse to serve it outside development.
+export const loginAsTestUser = async () => {
+  const { data } = await authApi.post(
+    '/test-login',
+    {},
+    { headers: { 'x-test-login-secret': extra.TEST_LOGIN_SECRET } }
+  );
   return data.token ?? data;
 };

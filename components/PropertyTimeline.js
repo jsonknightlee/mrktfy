@@ -56,7 +56,16 @@ export default function PropertyTimeline({ timeline }) {
       <Text style={styles.title}>Property timeline</Text>
       
       <View style={styles.timelineContainer}>
-        {parsedTimeline.map((event, index) => (
+        {parsedTimeline.map((event, index) => {
+          const rawType = typeof event?.type === 'string' ? event.type : null;
+          const rawStatus = typeof event?.status === 'string' ? event.status : null;
+          const eventType = (rawType ?? rawStatus ?? '').trim();
+          const hasEventType = eventType.length > 0;
+          const rawChange = event?.change;
+          const eventChange = typeof rawChange === 'string' ? rawChange.trim() : rawChange != null ? String(rawChange) : '';
+          const hasEventChange = eventChange.length > 0;
+
+          return (
           <View key={index} style={styles.timelineItem}>
             {/* Timeline line - above */}
             {index > 0 && <View style={styles.timelineLineAbove} />}
@@ -72,9 +81,14 @@ export default function PropertyTimeline({ timeline }) {
               <View style={styles.eventDetails}>
                 <View style={styles.eventHeader}>
                   <Text style={styles.eventDate}>{String(event.date || '')}</Text>
-                  <Text style={styles.eventStatus}>{String(event.status || '')}</Text>
+                  {hasEventType ? (
+                    <Text style={styles.eventStatus}>{eventType}</Text>
+                  ) : null}
                 </View>
                 <Text style={styles.eventPrice}>{String(event.price || '')}</Text>
+                {hasEventChange ? (
+                  <Text style={styles.eventChange}>{eventChange}</Text>
+                ) : null}
                 
                 {/* Property details if available */}
                 {event.details && (
@@ -139,9 +153,10 @@ export default function PropertyTimeline({ timeline }) {
             </View>
             
             {/* Timeline line - below */}
-            {index < timeline.length - 1 && <View style={styles.timelineLineBelow} />}
+            {index < parsedTimeline.length - 1 && <View style={styles.timelineLineBelow} />}
           </View>
-        ))}
+        );
+        })}
       </View>
     </View>
   );
@@ -215,6 +230,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#007AFF',
     fontWeight: '600',
+    marginBottom: 8,
+  },
+  eventChange: {
+    fontSize: 12,
+    color: '#666',
     marginBottom: 8,
   },
   propertyDetails: {

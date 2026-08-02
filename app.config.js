@@ -114,6 +114,8 @@ export default () => {
       STRIPE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
       APPLE_MERCHANT_ID: process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID ?? '',
       ENABLE_APPLE_PAY: process.env.EXPO_PUBLIC_ENABLE_APPLE_PAY === 'true',
+      ENABLE_TEST_LOGIN: process.env.EXPO_PUBLIC_ENABLE_TEST_LOGIN === 'true',
+      TEST_LOGIN_SECRET: process.env.EXPO_PUBLIC_TEST_LOGIN_SECRET ?? '',
     },
   };
 

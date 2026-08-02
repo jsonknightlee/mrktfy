@@ -21,6 +21,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { askBuyerWorkspaceAssistant } from '../services/BuyerWorkspaceService';
+import { getBuyerPreferences } from '../services/BuyerPreferencesService';
 import { getDecisionBoard, getDecisionBoardMediaOpenUrl } from '../services/DecisionBoardService';
 import { getListingById } from '../services/listingApi';
 import {
@@ -796,6 +797,8 @@ export default function PropertyDeckScreen({ route }) {
   const [selectedDeckId, setSelectedDeckId] = useState(null);
   const [deckListings, setDeckListings] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [swipeSessionTotal, setSwipeSessionTotal] = useState(0);
+  const [buyerPreferencesStatus, setBuyerPreferencesStatus] = useState(null);
   const [previewListing, setPreviewListing] = useState(null);
   const [editingDeckId, setEditingDeckId] = useState(null);
   const [editingName, setEditingName] = useState('');
@@ -895,6 +898,18 @@ export default function PropertyDeckScreen({ route }) {
     [deckFilters, deckListings, shortlistListingIdSet]
   );
   const currentListing = filteredDeckListings[currentIndex];
+  // Stable denominator for the "X / Y" deck counter: captured once per
+  // deck/filter session so it doesn't shrink as listings get shortlisted
+  // (shortlisting removes items from `filteredDeckListings`, which used to
+  // be used directly as the denominator, making the counter appear to go
+  // backwards while swiping).
+  const totalForCounter = swipeSessionTotal || filteredDeckListings.length;
+  const processedCount = totalForCounter
+    ? Math.min(
+        Math.max(totalForCounter - filteredDeckListings.length + currentIndex + 1, 1),
+        totalForCounter
+      )
+    : 0;
   const canCreateDeck = deckLimit > 0 && decks.length < deckLimit;
   const buyerWorkspaceItemId = buyerWorkspaceContext?.buyerWorkspaceItemId || buyerWorkspaceContext?.id || null;
 
@@ -1021,6 +1036,15 @@ export default function PropertyDeckScreen({ route }) {
     pan.setValue({ x: 0, y: 0 });
   }, [deckFilters, pan]);
 
+  // Recompute the counter's stable baseline whenever the deck's listing set
+  // or active filters change (i.e. whenever `currentIndex` resets to 0
+  // above/in loadDeckContent) - NOT when shortlist state changes, which is
+  // what shrinks `filteredDeckListings` on every right-swipe.
+  useEffect(() => {
+    setSwipeSessionTotal(filteredDeckListings.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckListings, deckFilters]);
+
   useEffect(() => {
     if (!filteredDeckListings.length) return;
     if (currentIndex < filteredDeckListings.length) return;
@@ -1120,6 +1144,29 @@ export default function PropertyDeckScreen({ route }) {
       isCancelled = true;
     };
   }, [deckFilters, deckListings, filteredDeckListings.length]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!selectedDeckId) {
+        setBuyerPreferencesStatus(null);
+        return;
+      }
+
+      let cancelled = false;
+      (async () => {
+        try {
+          const preference = await getBuyerPreferences(selectedDeckId);
+          if (!cancelled) setBuyerPreferencesStatus(preference?.onboardingStatus || 'NotStarted');
+        } catch (error) {
+          if (!cancelled) setBuyerPreferencesStatus(error?.response?.status === 404 ? 'NotStarted' : null);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [selectedDeckId])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -1885,6 +1932,17 @@ export default function PropertyDeckScreen({ route }) {
     );
   };
 
+  const showForYouRatingInfo = () => {
+    Alert.alert(
+      '"For you" rating',
+      'This score is personalized to your priorities. Update your buyer preferences in Property Deck > Filters to sharpen your "For you" rating scale.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Update preferences', onPress: () => setFilterModalVisible(true) },
+      ]
+    );
+  };
+
   const renderShortlistItem = ({ item, index }) => {
     const imageUrl = normalizeImageUrls(item)[0];
     const listingId = getListingId(item);
@@ -1928,6 +1986,22 @@ export default function PropertyDeckScreen({ route }) {
         )}
 
         <View style={styles.shortlistContent}>
+          <View style={styles.shortlistScoreRowFocal}>
+            <View style={styles.compactScorePillFocal}>
+              <Text style={styles.compactScoreLabel}>Overall</Text>
+              <Text style={styles.compactScoreValueFocal}>{propertyRating}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.compactScorePillFocal, styles.compactUserScorePill]}
+              activeOpacity={buyerPreferencesStatus === 'NotStarted' ? 0.7 : 1}
+              onPress={() => {
+                if (buyerPreferencesStatus === 'NotStarted') showForYouRatingInfo();
+              }}
+            >
+              <Text style={[styles.compactScoreLabel, styles.compactUserScoreLabel]}>For you</Text>
+              <Text style={[styles.compactScoreValueFocal, styles.compactUserScoreValue]}>{userRating}</Text>
+            </TouchableOpacity>
+          </View>
           <Text style={styles.shortlistPrice}>{formatPrice(item.Price)}</Text>
           {!!distanceText && (
             <Text style={styles.distanceText} numberOfLines={1}>{distanceText}</Text>
@@ -1935,16 +2009,6 @@ export default function PropertyDeckScreen({ route }) {
           <Text style={styles.shortlistTitle} numberOfLines={2}>
             {item.Title || item.Address || 'Shortlisted property'}
           </Text>
-          <View style={styles.shortlistScoreRow}>
-            <View style={styles.compactScorePill}>
-              <Text style={styles.compactScoreLabel}>Overall</Text>
-              <Text style={styles.compactScoreValue}>{propertyRating}</Text>
-            </View>
-            <View style={[styles.compactScorePill, styles.compactUserScorePill]}>
-              <Text style={[styles.compactScoreLabel, styles.compactUserScoreLabel]}>For you</Text>
-              <Text style={[styles.compactScoreValue, styles.compactUserScoreValue]}>{userRating}</Text>
-            </View>
-          </View>
           {!!rankingMeta && (
             <Text style={styles.rankingMetaText} numberOfLines={1}>{rankingMeta}</Text>
           )}
@@ -2022,7 +2086,7 @@ export default function PropertyDeckScreen({ route }) {
         <View style={styles.flowStepHeader}>
           <Text style={styles.columnTitle}>Property Deck</Text>
           <Text style={styles.flowCounter}>
-            {Math.min(currentIndex + 1, filteredDeckListings.length || 1)} / {filteredDeckListings.length || 0}
+            {processedCount} / {totalForCounter}
           </Text>
         </View>
         {renderDeckCard()}
@@ -4123,6 +4187,7 @@ const styles = StyleSheet.create({
   },
   shortlistContent: {
     flex: 1,
+    overflow: 'hidden',
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -4138,18 +4203,20 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 3,
   },
-  shortlistScoreRow: {
+  shortlistScoreRowFocal: {
     flexDirection: 'row',
     gap: 6,
-    marginTop: 8,
+    marginBottom: 6,
   },
-  compactScorePill: {
+  compactScorePillFocal: {
     alignItems: 'center',
     backgroundColor: '#F1F5F9',
-    borderRadius: 7,
+    borderRadius: 9,
+    flex: 1,
     flexDirection: 'row',
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   compactUserScorePill: {
     backgroundColor: '#EEF2FF',
@@ -4164,9 +4231,9 @@ const styles = StyleSheet.create({
   compactUserScoreLabel: {
     color: APP_PURPLE,
   },
-  compactScoreValue: {
+  compactScoreValueFocal: {
     color: '#111827',
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '900',
   },
   compactUserScoreValue: {

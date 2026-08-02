@@ -12,7 +12,14 @@ import {
   Linking,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { loginUser, fetchUserProfile, loginWithGoogle, loginWithApple } from '../../services/authApi';
+import {
+  loginUser,
+  fetchUserProfile,
+  loginWithGoogle,
+  loginWithApple,
+  loginAsTestUser,
+  isTestLoginEnabled,
+} from '../../services/authApi';
 import { AuthContext } from '../../contexts/AuthContext';
 
 import * as Google from 'expo-auth-session/providers/google';
@@ -27,7 +34,9 @@ export default function LoginScreen({ navigation }) {
   const [Password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [oauthLoading, setOauthLoading] = useState('');
+  const [testLoginSubmitting, setTestLoginSubmitting] = useState(false);
   const { signIn, setIsLoggedIn } = useContext(AuthContext);
+  const testLoginEnabled = __DEV__ && isTestLoginEnabled();
   const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
   const baseGoogleClientId = extra.GOOGLE_CLIENT_ID
     || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
@@ -158,6 +167,31 @@ export default function LoginScreen({ navigation }) {
       Alert.alert('Login Failed', msg);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleTestLogin = async () => {
+    if (testLoginSubmitting) return;
+
+    setTestLoginSubmitting(true);
+
+    try {
+      console.log('🧪 [TEST-LOGIN] Requesting test user token...');
+      const token = await loginAsTestUser();
+      const user = await fetchUserProfile(token);
+      console.log('🧪 [TEST-LOGIN] Signed in as test user:', user?.UserID || user?.Username);
+
+      if (typeof signIn === 'function') {
+        await signIn(token);
+      } else {
+        setIsLoggedIn?.(true);
+      }
+    } catch (err) {
+      console.error('❌ [TEST-LOGIN] Failed:', err);
+      const msg = err?.response?.data?.error || err?.message || 'Test login failed.';
+      Alert.alert('Test Login Failed', msg);
+    } finally {
+      setTestLoginSubmitting(false);
     }
   };
 
@@ -326,6 +360,23 @@ export default function LoginScreen({ navigation }) {
             Don't have an account? <Text style={styles.signUpLink}>Sign up</Text>
           </Text>
         </TouchableOpacity>
+
+        {testLoginEnabled && (
+          <TouchableOpacity
+            style={[styles.testLoginButton, testLoginSubmitting && styles.disabledButton]}
+            onPress={handleTestLogin}
+            disabled={testLoginSubmitting}
+          >
+            {testLoginSubmitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="flask-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.testLoginButtonText}>Continue as Test User</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -445,6 +496,20 @@ const styles = StyleSheet.create({
   },
   signUpLink: {
     color: '#007AFF',
+    fontWeight: '600',
+  },
+  testLoginButton: {
+    flexDirection: 'row',
+    backgroundColor: '#7C3AED',
+    borderRadius: 8,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  testLoginButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

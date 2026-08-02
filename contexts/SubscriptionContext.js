@@ -592,6 +592,7 @@ export function SubscriptionProvider({ children }) {
     if (isLoggedIn === true) {
       console.log('🔑 [SUBSCRIPTION] User logged in, reloading subscription data...');
       const reloadAfterLogin = async () => {
+        dispatch({ type: SUBSCRIPTION_ACTIONS.SET_LOADING, payload: true });
         try {
           const token = await getToken();
           if (token) {
@@ -697,6 +698,8 @@ export function SubscriptionProvider({ children }) {
           }
         } catch (error) {
           console.error('❌ [SUBSCRIPTION] Error reloading after login:', error);
+        } finally {
+          dispatch({ type: SUBSCRIPTION_ACTIONS.SET_LOADING, payload: false });
         }
       };
       
