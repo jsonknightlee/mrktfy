@@ -31,6 +31,20 @@ import NotificationBadge from '../components/NotificationBadge';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
+function BuyStackNavigator({ route }) {
+  const nestedScreen = route?.params?.screen === 'BuyerJourney' ? 'BuyerJourney' : 'BuyerWorkspace';
+  const nestedParams = route?.params?.params || (route?.params?.focusWorkspaceItemId ? { focusWorkspaceItemId: route.params.focusWorkspaceItemId } : undefined);
+  const stackKey = nestedScreen === 'BuyerJourney'
+    ? `buyer-journey:${nestedParams?.openDeckId || ''}:${nestedParams?.buyerWorkspaceContext?.buyerWorkspaceItemId || ''}`
+    : `buyer-workspace:${nestedParams?.focusWorkspaceItemId || ''}`;
+
+  return (
+    <Stack.Navigator key={stackKey} screenOptions={{ headerShown: false }} initialRouteName={nestedScreen}>
+      <Stack.Screen name="BuyerWorkspace" component={BuyerWorkspaceScreen} initialParams={nestedScreen === 'BuyerWorkspace' ? nestedParams : undefined} />
+      <Stack.Screen name="BuyerJourney" component={PropertyDeckScreen} initialParams={nestedScreen === 'BuyerJourney' ? nestedParams : undefined} />
+    </Stack.Navigator>
+  );
+}
 
 function MainTabs() {
   return (
@@ -47,7 +61,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Buy"
-        component={BuyerWorkspaceScreen}
+        component={BuyStackNavigator}
         options={{ tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} /> }}
       />
       <Tab.Screen

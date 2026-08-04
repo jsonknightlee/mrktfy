@@ -1,10 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NotificationStorageService from './NotificationStorageService';
 import { api } from './api';
+import { clearLocalDecisionBoardCache } from './DecisionBoardService';
+import { getBuyerWorkspaceItems, removeBuyerWorkspaceItem } from './BuyerWorkspaceStorageService';
 
 const DECKS_KEY = 'mrktfy_property_decks';
 const LEGACY_SHORTLIST_KEY = 'mrktfy_property_deck_shortlist';
 const LEGACY_DISMISSED_KEY = 'mrktfy_property_deck_dismissed';
+const BUY_CHECKLIST_PROGRESS_KEY = 'mrktfy_buy_checklist_progress';
 const apiFailureCache = new Map();
 const apiInFlightLabels = new Set();
 
@@ -568,6 +571,33 @@ const destroyLocalPropertyDeck = async (deckId, userProfile) => {
   return nextDecks.map(normalizeDeck);
 };
 
+const clearDeckRelatedLocalState = async (deckId) => {
+  const deckIdString = String(deckId);
+  const workspaceItems = await getBuyerWorkspaceItems();
+  const deckWorkspaceItems = workspaceItems.filter((item) => String(item?.propertyDeckId || '') === deckIdString);
+
+  const checklistKeys = new Set([
+    `${BUY_CHECKLIST_PROGRESS_KEY}:${deckIdString}`,
+    ...deckWorkspaceItems.flatMap((item) => {
+      const itemId = String(item?.id || '').trim();
+      const listingId = String(item?.listingId || item?.decisionBoardListingId || '').trim();
+      return [itemId, listingId]
+        .filter(Boolean)
+        .map((value) => `${BUY_CHECKLIST_PROGRESS_KEY}:${value}`);
+    }),
+  ]);
+
+  for (const item of deckWorkspaceItems) {
+    await removeBuyerWorkspaceItem(item.id);
+  }
+
+  await Promise.all([
+    clearLocalPropertyDeckCache(),
+    clearLocalDecisionBoardCache(),
+    ...Array.from(checklistKeys).map((key) => AsyncStorage.removeItem(key)),
+  ]);
+};
+
 const logDeckMutationError = (label, error) => {
   console.log(`[PROPERTY-DECK] ${label} failed:`, {
     status: error?.response?.status,
@@ -653,7 +683,9 @@ export const restorePropertyDeck = async (deckId, userProfile) => {
 
 export const destroyPropertyDeck = async (deckId, userProfile) => {
   if (!isBackendId(deckId)) {
-    return destroyLocalPropertyDeck(deckId, userProfile);
+    const nextDecks = await destroyLocalPropertyDeck(deckId, userProfile);
+    await clearDeckRelatedLocalState(deckId);
+    return nextDecks;
   }
 
   try {
@@ -682,7 +714,9 @@ export const destroyPropertyDeck = async (deckId, userProfile) => {
     }
 
     const decks = await getPropertyDecks(userProfile);
-    return decks.filter((deck) => deck.id !== String(deckId));
+    const nextDecks = decks.filter((deck) => deck.id !== String(deckId));
+    await clearDeckRelatedLocalState(deckId);
+    return nextDecks;
   } catch (error) {
     logDeckMutationError('destroy deck', error);
     throw error;
@@ -850,6 +884,62 @@ export const saveToShortlist = async (deckId, listing, userProfile) => withApiFa
   },
   () => saveLocalToShortlist(deckId, listing, userProfile),
   'save shortlist listing'
+);
+
+export const saveAllToShortlist = async (deckId, listings = [], userProfile) => withApiFallback(
+  async () => {
+    requireBackendId(deckId, 'deckId');
+    const deck = await getPropertyDeck(deckId, userProfile);
+    const payloadListings = (Array.isArray(listings) ? listings : [])
+      .map((listing) => {
+        const listingId = getListingId(listing);
+        if (!listingId) return null;
+
+        const listingWithDistance = withSearchDistance(listing, deck?.filterJson);
+        return {
+          listingId,
+          sourcePropertyDeckListingId: listing.propertyDeckListingId || null,
+          distanceMiles: listingWithDistance.distanceMiles,
+          searchDistanceMiles: listingWithDistance.SearchDistanceMiles,
+        };
+      })
+      .filter(Boolean);
+
+    const { data } = await api.post(`/api/property-decks/${deckId}/shortlist/bulk`, {
+      listings: payloadListings,
+    });
+
+    const shortlist = getItems(data, 'shortlist')
+      .map((item) => normalizeListing(item))
+      .map((item) => withDeckSearchDistance(item, deck));
+
+    return {
+      shortlist,
+      shortlistCount: shortlist.length,
+      addedCount: toNumber(data?.addedCount) ?? shortlist.length,
+      skippedCount: toNumber(data?.skippedCount) ?? 0,
+      processedCount: toNumber(data?.processedCount) ?? payloadListings.length,
+      processedListingIds: Array.isArray(data?.processedListingIds) ? data.processedListingIds.map(String).filter(Boolean) : payloadListings.map((item) => String(item.listingId)).filter(Boolean),
+      remainingMatchedCount: toNumber(data?.remainingMatchedCount) ?? null,
+    };
+  },
+  async () => {
+    let shortlist = [];
+    for (const listing of Array.isArray(listings) ? listings : []) {
+      shortlist = await saveToShortlist(deckId, listing, userProfile);
+    }
+
+    return {
+      shortlist,
+      shortlistCount: shortlist.length,
+      addedCount: shortlist.length,
+      skippedCount: 0,
+      processedCount: Array.isArray(listings) ? listings.length : 0,
+      processedListingIds: (Array.isArray(listings) ? listings : []).map((item) => getListingId(item)).filter(Boolean),
+      remainingMatchedCount: 0,
+    };
+  },
+  'save all shortlist listings'
 );
 
 export const updateShortlistRanking = async (deckId, listingId, rankingPayload = {}, userProfile) => withApiFallback(
@@ -1045,4 +1135,52 @@ export const removeComparisonBoardListing = async (boardId, listingId) => withAp
   },
   async () => ({ success: false, localOnly: true }),
   'remove comparison board listing'
+);
+
+export const getBuyerPreferences = async (deckId, userProfile) => withApiFallback(
+  async () => {
+    if (deckId) {
+      requireBackendId(deckId, 'deckId');
+    }
+    const params = deckId ? { propertyDeckId: deckId } : {};
+    const { data } = await api.get('/api/onboarding/buyer-preferences', { params });
+    return data?.preference ?? null;
+  },
+  async () => {
+    if (!deckId) return null;
+    const deck = await getPropertyDeck(deckId, userProfile);
+    return deck?.buyerPreferences || null;
+  },
+  'get buyer preferences'
+);
+
+export const setBuyerPreferences = async (deckId, payload = {}, userProfile) => withApiFallback(
+  async () => {
+    requireBackendId(deckId, 'deckId');
+    const { data } = await api.put('/api/onboarding/buyer-preferences', {
+      ...payload,
+      propertyDeckId: deckId,
+    });
+    return data?.preference ?? null;
+  },
+  async () => ({
+    id: null,
+    propertyDeckId: deckId ?? null,
+    onboardingStatus: payload?.onboardingStatus || 'Completed',
+  }),
+  'set buyer preferences'
+);
+
+export const skipBuyerPreferences = async (deckId, userProfile) => withApiFallback(
+  async () => {
+    requireBackendId(deckId, 'deckId');
+    const { data } = await api.post('/api/onboarding/buyer-preferences/skip', { propertyDeckId: deckId });
+    return data?.preference ?? null;
+  },
+  async () => ({
+    id: null,
+    propertyDeckId: deckId ?? null,
+    onboardingStatus: 'Skipped',
+  }),
+  'skip buyer preferences'
 );

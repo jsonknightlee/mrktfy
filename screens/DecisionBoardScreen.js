@@ -38,7 +38,7 @@ const FLOW_STEPS = [
 const ACTIVE_FLOW_STEP = 'decision';
 
 const TRAFFIC_LIGHT = {
-  Green: { color: '#22C55E', label: 'Active' },
+  Green: { color: '#22C55E', label: 'Good fit' },
   Orange: { color: '#F97316', label: 'Tentative' },
   Red: { color: '#EF4444', label: 'Closed' },
 };
@@ -196,6 +196,21 @@ const getCompareProsCons = (ranking, item) => {
   };
 };
 
+const getDecisionBoardListingKey = (item, index = 0) => (
+  String(item?.id || item?.ID || item?.listingId || item?.ListingID || `${index}`)
+);
+
+const dedupeDecisionBoardListings = (items = []) => {
+  const seen = new Set();
+
+  return (Array.isArray(items) ? items : []).filter((item, index) => {
+    const key = getDecisionBoardListingKey(item, index);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 export default function DecisionBoardScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const initialBoard = route.params?.decisionBoard || null;
@@ -208,7 +223,7 @@ export default function DecisionBoardScreen({ route, navigation }) {
   const [selectedCompareIds, setSelectedCompareIds] = useState([]);
   const [compareModalVisible, setCompareModalVisible] = useState(false);
 
-  const listings = board?.listings || [];
+  const listings = useMemo(() => dedupeDecisionBoardListings(board?.listings || []), [board?.listings]);
   const selectedCompareListings = listings.filter((item) => selectedCompareIds.includes(String(item.id || item.listingId)));
   const activeCount = listings.filter((item) => item.listingStatus !== 'Closed').length;
   const progressPercent = board?.maxProperties ? Math.round((activeCount / board.maxProperties) * 100) : 0;
@@ -536,7 +551,7 @@ export default function DecisionBoardScreen({ route, navigation }) {
 
     return (
       <TouchableOpacity
-        key={item.id || item.listingId}
+        key={item._renderKey || item.id || item.listingId}
         style={styles.propertyCard}
         activeOpacity={0.9}
         onPress={() => navigation.navigate('DecisionBoardListing', {
@@ -739,7 +754,7 @@ export default function DecisionBoardScreen({ route, navigation }) {
               </Text>
             </TouchableOpacity>
           </View>
-          {listings.length ? listings.map(renderDecisionListing) : (
+          {listings.length ? listings.map((item, index) => renderDecisionListing({ ...item, _renderKey: getDecisionBoardListingKey(item, index) })) : (
             <View style={styles.emptyPanel}>
               <Text style={styles.emptyPanelTitle}>No properties yet</Text>
               <Text style={styles.emptyPanelText}>Use Pursue from a property to add it to this Decision Board.</Text>

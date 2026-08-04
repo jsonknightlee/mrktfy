@@ -29,7 +29,7 @@ export default () => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.mrktfy.mrktfy',
-      buildNumber: '60',
+      buildNumber: '61',
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription:

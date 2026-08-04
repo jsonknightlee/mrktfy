@@ -20,6 +20,7 @@ import { AdBanner } from '../services/adService';
 import { api } from '../services/api';
 import {
   createPropertyDeckFromListings,
+  getBuyerPreferences,
   getPropertyDeckLimit,
   getPropertyDecks,
 } from '../services/PropertyDeckService';
@@ -40,6 +41,7 @@ const FILTER_STORAGE_KEY = 'mrktfy-filters';
 const TYPE_STORAGE_KEY = 'mrktfy-property-type';
 const SEARCH_LOCATION_STORAGE_KEY = 'mrktfy-map-search-location';
 const SEARCH_LOCATION_HISTORY_STORAGE_KEY = 'mrktfy-map-search-location-history';
+const FIRST_DECK_CREATION_RESUME_KEY = 'mrktfy-pending-first-deck-creation';
 const TOAST_DURATION_MS = 20000; // 20s
 const MAP_LISTING_LIMIT = 350;
 const SEARCH_LOCATION_HISTORY_LIMIT = 5;
@@ -105,6 +107,7 @@ export default function MapScreen() {
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [locationSearchReady, setLocationSearchReady] = useState(false);
   const [isCreatingDeck, setIsCreatingDeck] = useState(false);
+  const [createDeckExpanded, setCreateDeckExpanded] = useState(false);
   const [listingsLoading, setListingsLoading] = useState(false);
 
   // Wheel state (we avoid re-render during scroll)
@@ -117,9 +120,11 @@ export default function MapScreen() {
   // Animations & refs
   const [badgeAnim] = useState(new Animated.Value(200));
   const deckBorderAnim = useRef(new Animated.Value(0)).current;
+  const createDeckWidthAnim = useRef(new Animated.Value(50)).current;
   const isInteractingWithMarker = useRef(false);
   const isDismissingRef = useRef(false);
   const listingsRequestSeqRef = useRef(0);
+  const handleCreatePropertyDeckRef = useRef(null);
 
   // Toast
   const [toastText, setToastText] = useState('');
@@ -173,7 +178,7 @@ export default function MapScreen() {
   // Zoom the initial map view out enough to comfortably fit the full
   // subscription search-radius circle (bigger tiers = wider radius = more zoomed out).
   const mapInitialDelta = useMemo(() => {
-    const radiusKm = getMaxSearchRadius() || 2;
+    const radiusKm = getMaxSearchRadius();
     const paddingMultiplier = 2.6; // extra breathing room around the radius circle
     const latitudeDelta = (radiusKm * 2 * paddingMultiplier) / 111;
     const latitudeForLongitude = activeSearchLocation?.latitude ?? userLocation?.latitude ?? 0;
@@ -269,6 +274,28 @@ export default function MapScreen() {
     }
   };
 
+  useEffect(() => {
+    Animated.timing(createDeckWidthAnim, {
+      toValue: createDeckExpanded ? 202 : 50,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [createDeckExpanded, createDeckWidthAnim]);
+
+  const handleCreateDeckPress = () => {
+    if (isCreatingDeck) {
+      return;
+    }
+
+    if (!createDeckExpanded) {
+      setCreateDeckExpanded(true);
+      return;
+    }
+
+    setCreateDeckExpanded(false);
+    handleCreatePropertyDeck();
+  };
+
   const saveSearchLocationHistory = async (location) => {
     if (!location?.latitude || !location?.longitude) return;
 
@@ -283,6 +310,17 @@ export default function MapScreen() {
 
     setSearchLocationHistory(nextHistory);
     await AsyncStorage.setItem(SEARCH_LOCATION_HISTORY_STORAGE_KEY, JSON.stringify(nextHistory));
+  };
+
+  const useCurrentLocationForSearch = async () => {
+    setSearchLocation(null);
+    setSearchLocationQuery('');
+    setSearchLocationInputVisible(false);
+    await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
+
+    if (userLocation?.latitude && userLocation?.longitude) {
+      await loadListingsForLocation(userLocation, isRental ? TYPE_RENT : TYPE_SALE);
+    }
   };
 
   const selectSearchLocation = async (location) => {
@@ -472,16 +510,6 @@ export default function MapScreen() {
     }
   };
 
-  const useCurrentLocationForSearch = async () => {
-    if (!userLocation) return;
-    setSelectedListing(null);
-    setSearchLocation(null);
-    setSearchLocationInputVisible(false);
-    setSearchLocationQuery('');
-    await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
-    await loadListingsForLocation(userLocation, isRental ? TYPE_RENT : TYPE_SALE);
-  };
-
   // re-apply when (new) listings arrive
   useEffect(() => {
     // Always show the map, regardless of listings count
@@ -561,14 +589,39 @@ export default function MapScreen() {
       return;
     }
 
-    setIsCreatingDeck(true);
-
     try {
       const existingDecks = await getPropertyDecks(userProfile);
       if (existingDecks.length >= deckLimit) {
         showToast(`You have reached your ${subscriptionName} Property Deck limit.`);
         return;
       }
+
+      if (existingDecks.length === 0) {
+        let buyerPreferenceStatus = 'NotStarted';
+
+        try {
+          const buyerPreferences = await getBuyerPreferences();
+          buyerPreferenceStatus = buyerPreferences?.onboardingStatus || 'NotStarted';
+        } catch (error) {
+          if (error?.response?.status !== 404) {
+            console.log('[PROPERTY-DECK] buyer preferences lookup failed before first deck creation:', {
+              status: error?.response?.status,
+              data: error?.response?.data,
+              message: error?.message,
+            });
+          }
+        }
+
+        if (!['Completed', 'Skipped'].includes(buyerPreferenceStatus)) {
+          navigation.navigate('BuyerPreferences', {
+            scope: 'default',
+            entryPoint: 'map-first-deck',
+          });
+          return;
+        }
+      }
+
+      setIsCreatingDeck(true);
 
       const searchRadiusKm = getMaxSearchRadius();
       const deckSearchLocation = activeSearchLocation || userLocation;
@@ -634,6 +687,30 @@ export default function MapScreen() {
       setIsCreatingDeck(false);
     }
   };
+
+  useEffect(() => {
+    handleCreatePropertyDeckRef.current = handleCreatePropertyDeck;
+  }, [handleCreatePropertyDeck]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      try {
+        const pendingResume = await AsyncStorage.getItem(FIRST_DECK_CREATION_RESUME_KEY);
+        if (!pendingResume) {
+          return;
+        }
+
+        await AsyncStorage.removeItem(FIRST_DECK_CREATION_RESUME_KEY);
+        handleCreatePropertyDeckRef.current?.();
+      } catch (error) {
+        console.log('[PROPERTY-DECK] failed to resume first deck creation:', {
+          message: error?.message,
+        });
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation]);
 
   const handleFavoriteToggleWithAd = (listingId) => {
     // Directly toggle favorite without showing ad
@@ -768,11 +845,12 @@ export default function MapScreen() {
         </View>
       )}
 
-      <TouchableOpacity
-        style={[styles.createDeckOuter, isCreatingDeck && styles.createDeckOuterDisabled]}
-        onPress={handleCreatePropertyDeck}
-        activeOpacity={0.9}
-        disabled={isCreatingDeck}
+      <Animated.View
+        style={[
+          styles.createDeckOuter,
+          { width: createDeckWidthAnim },
+          isCreatingDeck && styles.createDeckOuterDisabled,
+        ]}
       >
         <Animated.View
           pointerEvents="none"
@@ -788,19 +866,27 @@ export default function MapScreen() {
             },
           ]}
         />
-        <View style={styles.createDeckBtn}>
-          <Text style={[styles.createDeckBtnText, isCreatingDeck && styles.createDeckBtnTextDisabled]}>
-            {isCreatingDeck ? 'Creating…' : 'Create'}
-          </Text>
+        <TouchableOpacity
+          style={[styles.createDeckBtn, createDeckExpanded && styles.createDeckBtnExpanded, isCreatingDeck && styles.createDeckBtnDisabled]}
+          onPress={handleCreateDeckPress}
+          activeOpacity={0.9}
+          disabled={isCreatingDeck}
+        >
           <View style={[styles.createDeckIconWrap, isCreatingDeck && styles.createDeckIconWrapDisabled]}>
             {isCreatingDeck ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+              <Ionicons name="add" size={18} color="#FFFFFF" />
             )}
           </View>
-        </View>
-      </TouchableOpacity>
+          {createDeckExpanded && !isCreatingDeck && (
+            <Text style={styles.createDeckBtnText}>Create Property Deck</Text>
+          )}
+          {isCreatingDeck && (
+            <Text style={[styles.createDeckBtnText, styles.createDeckBtnTextDisabled]}>Creating…</Text>
+          )}
+        </TouchableOpacity>
+      </Animated.View>
 
       {/* Subscription Badge */}
       <TouchableOpacity 
@@ -1409,7 +1495,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     padding: 2,
-    width: 112,
     shadowColor: '#000',
     shadowOpacity: 0.22,
     shadowRadius: 9,
@@ -1422,36 +1507,41 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 150,
     height: 150,
-    backgroundColor: '#6366F1',
+    backgroundColor: APP_PURPLE,
     borderRadius: 75,
-    borderWidth: 38,
-    borderTopColor: '#FF4D8D',
-    borderRightColor: '#FACC15',
-    borderBottomColor: '#22C55E',
-    borderLeftColor: '#38BDF8',
+    opacity: 0.16,
   },
   createDeckBtn: {
     alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: APP_PURPLE,
     borderRadius: 23,
     flexDirection: 'row',
     height: 46,
     justifyContent: 'center',
     paddingHorizontal: 10,
-    width: 108,
+    width: 46,
+  },
+  createDeckBtnExpanded: {
+    justifyContent: 'flex-start',
+    paddingLeft: 8,
+    width: 198,
+  },
+  createDeckBtnDisabled: {
+    opacity: 0.85,
   },
   createDeckBtnText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
-    marginRight: 7,
+    marginLeft: 8,
+    marginRight: 2,
   },
   createDeckBtnTextDisabled: {
     color: '#D1D5DB',
   },
   createDeckIconWrap: {
     alignItems: 'center',
-    backgroundColor: APP_PURPLE,
+    backgroundColor: '#7C3AED',
     borderRadius: 16,
     height: 30,
     justifyContent: 'center',

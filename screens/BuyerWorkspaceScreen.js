@@ -47,7 +47,7 @@ export default function BuyerWorkspaceScreen({ route, navigation }) {
   }, [loadItems, focusWorkspaceItemId]));
 
   const openWorkspaceItem = (item) => {
-    navigation.navigate('Deck', {
+    navigation.navigate('BuyerJourney', {
       openMode: 'buy',
       openDeckId: item.propertyDeckId || undefined,
       buyerWorkspaceContext: {

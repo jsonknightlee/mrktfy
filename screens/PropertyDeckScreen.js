@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { askBuyerWorkspaceAssistant } from '../services/BuyerWorkspaceService';
 import { getBuyerPreferences } from '../services/BuyerPreferencesService';
-import { getDecisionBoard, getDecisionBoardMediaOpenUrl } from '../services/DecisionBoardService';
+import { getDecisionBoard, getDecisionBoardLinkedListingIds, getDecisionBoardMediaOpenUrl } from '../services/DecisionBoardService';
 import { getListingById } from '../services/listingApi';
 import {
   archivePropertyDeck,
@@ -36,6 +36,7 @@ import {
   removeFromShortlist,
   renamePropertyDeck,
   restorePropertyDeck,
+  saveAllToShortlist,
   saveToShortlist,
   formatPropertyDeckLimit,
 } from '../services/PropertyDeckService';
@@ -760,6 +761,30 @@ const getDeckShortlistCount = (deck) => {
   return Array.isArray(deck?.shortlist) ? deck.shortlist.length : 0;
 };
 
+const getShortlistEntryKey = (listing) => {
+  const listingId = getListingId(listing);
+  const shortlistListingId = listing?.shortListListingId || listing?.ShortListListingId || listing?.ShortListListingID || listing?.shortlistListingId;
+  const propertyDeckListingId = listing?.propertyDeckListingId || listing?.PropertyDeckListingID;
+  return String(listingId || shortlistListingId || propertyDeckListingId || '');
+};
+
+const mergeShortlistListings = (primaryListings = [], fallbackListings = [], optimisticListing = null) => {
+  const merged = [];
+  const seen = new Set();
+
+  [optimisticListing, ...primaryListings, ...fallbackListings].forEach((listing) => {
+    if (!listing) return;
+
+    const key = getShortlistEntryKey(listing);
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    merged.push(listing);
+  });
+
+  return merged;
+};
+
 const getBackendRankGroupOrder = (listing) => {
   const breakdown = parseJsonObject(listing?.scoreBreakdownJson || listing?.ScoreBreakdownJson);
   const group = breakdown?.personalised?.rankGroup || breakdown?.rankGroup || breakdown?.final?.rankGroup;
@@ -816,6 +841,10 @@ export default function PropertyDeckScreen({ route }) {
   const [buyerWorkspaceContext, setBuyerWorkspaceContext] = useState(null);
   const [buyChecklistProgress, setBuyChecklistProgress] = useState({});
   const [decisionBoardLinkedListingIds, setDecisionBoardLinkedListingIds] = useState([]);
+  const [shortlistSelectionMode, setShortlistSelectionMode] = useState(false);
+  const [shortlistSelectionIds, setShortlistSelectionIds] = useState([]);
+  const [isAddingAllToShortlist, setIsAddingAllToShortlist] = useState(false);
+  const [allListingsProcessed, setAllListingsProcessed] = useState(false);
 
   useEffect(() => {
     deckListingsRef.current = deckListings;
@@ -883,6 +912,26 @@ export default function PropertyDeckScreen({ route }) {
       );
     })
   ), [pendingShortlistRemovals, sortedShortlist]);
+  const shortlistSelectionIdSet = useMemo(() => new Set(shortlistSelectionIds.map((value) => String(value))), [shortlistSelectionIds]);
+  const selectedShortlistItems = useMemo(() => (
+    visibleShortlist.filter((listing) => shortlistSelectionIdSet.has(String(getListingId(listing))))
+  ), [shortlistSelectionIdSet, visibleShortlist]);
+
+  useEffect(() => {
+    if (mode === 'shortlist') return;
+    setShortlistSelectionMode(false);
+    setShortlistSelectionIds([]);
+  }, [mode]);
+
+  useEffect(() => {
+    if (!shortlistSelectionMode) return;
+
+    setShortlistSelectionIds((current) => {
+      const visibleIds = new Set(visibleShortlist.map((listing) => String(getListingId(listing))));
+      return current.filter((value) => visibleIds.has(String(value)));
+    });
+  }, [shortlistSelectionMode, visibleShortlist]);
+
   const activeDecks = decks.filter((deck) => !isDeckDeleted(deck));
   const deletedDecks = decks.filter(isDeckDeleted);
   const filteredDeckListings = useMemo(
@@ -897,6 +946,7 @@ export default function PropertyDeckScreen({ route }) {
     }),
     [deckFilters, deckListings, shortlistListingIdSet]
   );
+  const remainingDeckListings = useMemo(() => (filteredDeckListings || []).slice(currentIndex), [currentIndex, filteredDeckListings]);
   const currentListing = filteredDeckListings[currentIndex];
   // Stable denominator for the "X / Y" deck counter: captured once per
   // deck/filter session so it doesn't shrink as listings get shortlisted
@@ -1006,7 +1056,9 @@ export default function PropertyDeckScreen({ route }) {
     setDecks((currentDecks) => nextDecks.map((deck) => {
       const currentDeck = currentDecks.find((item) => String(item.id) === String(deck.id));
       if (String(deck.id) === String(deckId)) {
-        return { ...deck, shortlist: nextShortlist, shortlistCount: nextShortlist.length };
+        const currentShortlist = Array.isArray(currentDeck?.shortlist) ? currentDeck.shortlist : [];
+        const shortlist = mergeShortlistListings(nextShortlist, currentShortlist);
+        return { ...deck, shortlist, shortlistCount: shortlist.length };
       }
       const currentShortlist = Array.isArray(currentDeck?.shortlist) ? currentDeck.shortlist : [];
       return currentShortlist.length
@@ -1036,6 +1088,10 @@ export default function PropertyDeckScreen({ route }) {
     pan.setValue({ x: 0, y: 0 });
   }, [deckFilters, pan]);
 
+  useEffect(() => {
+    setAllListingsProcessed(false);
+  }, [selectedDeckId]);
+
   // Recompute the counter's stable baseline whenever the deck's listing set
   // or active filters change (i.e. whenever `currentIndex` resets to 0
   // above/in loadDeckContent) - NOT when shortlist state changes, which is
@@ -1062,7 +1118,32 @@ export default function PropertyDeckScreen({ route }) {
 
   useFocusEffect(
     useCallback(() => {
-      loadDecisionBoardLinkedShortlist();
+      let isCancelled = false;
+
+      const syncLinkedListings = async () => {
+        try {
+          await loadDecisionBoardLinkedShortlist();
+          if (isCancelled) return;
+
+          const linkedListingIds = await getDecisionBoardLinkedListingIds();
+          if (isCancelled) return;
+
+          const nextIds = Array.isArray(linkedListingIds)
+            ? linkedListingIds.map((value) => String(value)).filter(Boolean)
+            : [];
+
+          setDecisionBoardLinkedListingIds(nextIds);
+          await AsyncStorage.setItem(DECISION_BOARD_LINKED_SHORTLIST_KEY, JSON.stringify(nextIds));
+        } catch {
+          await loadDecisionBoardLinkedShortlist();
+        }
+      };
+
+      syncLinkedListings();
+
+      return () => {
+        isCancelled = true;
+      };
     }, [loadDecisionBoardLinkedShortlist])
   );
 
@@ -1415,7 +1496,14 @@ export default function PropertyDeckScreen({ route }) {
         if (rankedShortlist) {
           setDecks((currentDecks) => currentDecks.map((deck) => (
             String(deck.id) === String(deckId)
-              ? { ...deck, shortlist: rankedShortlist, shortlistCount: rankedShortlist.length }
+              ? (() => {
+                  const shortlist = mergeShortlistListings(rankedShortlist, deck.shortlist || [], listing);
+                  return {
+                    ...deck,
+                    shortlist,
+                    shortlistCount: shortlist.length,
+                  };
+                })()
               : deck
           )));
         } else {
@@ -1439,6 +1527,49 @@ export default function PropertyDeckScreen({ route }) {
       }
     })();
   }, [currentListing, pan, selectedDeckId, userProfile]);
+
+  const handleAddAllToShortlist = useCallback(async () => {
+    if (!selectedDeckId || isProcessingRef.current || isAddingAllToShortlist) return;
+
+    if (!remainingDeckListings.length) return;
+
+    isProcessingRef.current = true;
+    setIsAddingAllToShortlist(true);
+
+    try {
+      const bulkResult = await saveAllToShortlist(selectedDeckId, remainingDeckListings, userProfile);
+
+      setDecks((currentDecks) => currentDecks.map((deck) => (
+        String(deck.id) === String(selectedDeckId)
+          ? {
+              ...deck,
+              shortlist: bulkResult.shortlist,
+              shortlistCount: bulkResult.shortlistCount,
+            }
+          : deck
+      )));
+
+      setDeckListings([]);
+      setCurrentIndex(0);
+      setPreviewListing(null);
+      pan.setValue({ x: 0, y: 0 });
+      setAllListingsProcessed(true);
+      loadedDeckContentIdRef.current = null;
+      loadedDeckContentModeRef.current = null;
+      setMode('shortlist');
+    } catch (error) {
+      console.log('[PROPERTY-DECK] add all to shortlist failed:', {
+        deckId: selectedDeckId,
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+      Alert.alert('Could not add all to shortlist', getDeckActionErrorMessage(error));
+    } finally {
+      isProcessingRef.current = false;
+      setIsAddingAllToShortlist(false);
+    }
+  }, [isAddingAllToShortlist, pan, remainingDeckListings, selectedDeckId, setMode, userProfile]);
 
   const handlePreviewDecision = async (direction) => {
     if (!previewListing) return;
@@ -1569,21 +1700,36 @@ export default function PropertyDeckScreen({ route }) {
     });
   };
 
+  const openDecisionBoardsForSelectedListings = () => {
+    if (!selectedShortlistItems.length) return;
+
+    const primarySelection = selectedShortlistItems[0];
+    setShortlistSelectionMode(false);
+    setShortlistSelectionIds([]);
+
+    navigation.navigate('DecisionBoards', {
+      pendingListing: primarySelection,
+      pendingListings: selectedShortlistItems,
+      pendingSource: {
+        sourceFlow: 'propertyDeck',
+        propertyDeckId: selectedDeckId,
+        shortListId: primarySelection?.shortListId || primarySelection?.ShortListID || null,
+        shortListListingId: primarySelection?.shortListListingId || primarySelection?.ShortListListingId || primarySelection?.ShortListListingID || primarySelection?.shortlistListingId,
+        suggestedBoardName: `${selectedDeck?.name || 'Property'} Decisions`,
+      },
+    });
+  };
+
   const goBackFromBuy = () => {
-    if (buyerWorkspaceContext && buyerContextBoard?.id) {
-      navigation.navigate('DecisionBoard', {
-        decisionBoardId: buyerContextBoard.id,
-        decisionBoard: buyerContextBoard,
-      });
-      return;
-    }
-
-    if (buyerWorkspaceContext) {
-      openDecisionBoardsForDeck();
-      return;
-    }
-
-    setMode('shortlist');
+    navigation.navigate('Tabs', {
+      screen: 'Buy',
+      params: {
+        screen: 'BuyerWorkspace',
+        params: {
+          focusWorkspaceItemId: buyerWorkspaceItemId || undefined,
+        },
+      },
+    });
   };
 
   const handleFlowStepPress = (stepKey) => {
@@ -1593,7 +1739,17 @@ export default function PropertyDeckScreen({ route }) {
     }
 
     if (stepKey === 'buy') {
-      navigation.navigate('Buy');
+      navigation.navigate('Tabs', {
+        screen: 'Buy',
+        params: {
+          screen: 'BuyerJourney',
+          params: {
+            openMode: 'buy',
+            openDeckId: selectedDeckId || undefined,
+            buyerWorkspaceContext: buyerWorkspaceContext || undefined,
+          },
+        },
+      });
       return;
     }
 
@@ -1638,7 +1794,7 @@ export default function PropertyDeckScreen({ route }) {
   const confirmDestroyDeck = (deck) => {
     Alert.alert(
       'Destroy Property Deck',
-      'This permanently deletes the deck and its shortlist and board records. This cannot be undone.',
+      'This permanently deletes the deck, its shortlist, its Decision Boards, and any Buyer Workspace data linked to it. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1856,21 +2012,28 @@ export default function PropertyDeckScreen({ route }) {
   const renderDeckCard = () => {
     if (!currentListing) {
       const filtersHaveNoMatches = deckListings.length > 0 && filteredDeckListings.length === 0;
+      const processedAllListings = allListingsProcessed && deckListings.length > 0;
 
       return (
         <View style={styles.detailEmptyState}>
           <Ionicons
-            name={filtersHaveNoMatches ? 'filter-outline' : 'checkmark-circle-outline'}
+            name={processedAllListings ? 'checkmark-circle-outline' : filtersHaveNoMatches ? 'filter-outline' : 'checkmark-circle-outline'}
             size={38}
             color={APP_PURPLE}
           />
           <Text style={styles.emptyTitle}>
-            {filtersHaveNoMatches ? 'No listings match these filters' : 'Deck cleared'}
+            {processedAllListings
+              ? 'All listings have been Processed'
+              : filtersHaveNoMatches
+                ? 'No listings match these filters'
+                : 'Deck cleared'}
           </Text>
           <Text style={styles.emptyText}>
-            {filtersHaveNoMatches
-              ? 'Adjust or reset the Property Deck filters to bring listings back into the swipe flow.'
-              : 'New matched properties from notifications will appear here.'}
+            {processedAllListings
+              ? 'We’ll look for updates in the area suitable to the criteria later.'
+              : filtersHaveNoMatches
+                ? 'Adjust or reset the Property Deck filters to bring listings back into the swipe flow.'
+                : 'New matched properties from notifications will appear here.'}
           </Text>
         </View>
       );
@@ -1964,16 +2127,29 @@ export default function PropertyDeckScreen({ route }) {
     const currentTierKey = String(currentTier || 'free').toLowerCase();
     const isBuyerTier = ['free', 'prospector'].includes(currentTierKey);
     const isDecisionBoardLocked = isBuyerTier && listingId && decisionBoardLinkedListingIdSet.has(String(listingId));
+    const canSelectShortlistItem = !isPendingRemoval && !isDecisionBoardLocked;
+    const isSelected = shortlistSelectionMode && listingId && shortlistSelectionIdSet.has(String(listingId));
 
     return (
       <TouchableOpacity
         style={[styles.shortlistItem, isPendingRemoval && styles.shortlistItemPendingRemoval]}
         activeOpacity={0.9}
         onPress={() => {
-          if (!isPendingRemoval) openListingPreview(item);
+          if (isPendingRemoval) return;
+          if (shortlistSelectionMode) {
+            if (canSelectShortlistItem) {
+              setShortlistSelectionIds((current) => (
+                current.includes(String(listingId))
+                  ? current.filter((value) => String(value) !== String(listingId))
+                  : [...current, String(listingId)]
+              ));
+            }
+            return;
+          }
+          openListingPreview(item);
         }}
         onLongPress={() => {
-          if (!isPendingRemoval) openFullListing(item);
+          if (!isPendingRemoval && !shortlistSelectionMode) openFullListing(item);
         }}
       >
         <Text style={styles.shortlistRank}>#{index + 1}</Text>
@@ -2012,7 +2188,13 @@ export default function PropertyDeckScreen({ route }) {
           {!!rankingMeta && (
             <Text style={styles.rankingMetaText} numberOfLines={1}>{rankingMeta}</Text>
           )}
-          {!isPendingRemoval && (
+          {isDecisionBoardLocked && (
+            <View style={styles.shortlistLockedBadge}>
+              <Ionicons name="git-branch-outline" size={12} color="#64748B" />
+              <Text style={styles.shortlistLockedBadgeText}>Already in Decision Board</Text>
+            </View>
+          )}
+          {!isPendingRemoval && !shortlistSelectionMode && (
             <TouchableOpacity
               style={[
                 styles.shortlistDecisionButton,
@@ -2045,10 +2227,27 @@ export default function PropertyDeckScreen({ route }) {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={styles.removeButton}
-              onPress={() => handleRemoveFromShortlist(shortlistDeleteId)}
+              style={[
+                styles.removeButton,
+                shortlistSelectionMode && styles.shortlistCheckboxButton,
+                shortlistSelectionMode && isSelected && styles.shortlistCheckboxButtonSelected,
+                shortlistSelectionMode && !canSelectShortlistItem && styles.shortlistCheckboxButtonDisabled,
+              ]}
+              onPress={() => {
+                if (shortlistSelectionMode) {
+                  if (!canSelectShortlistItem) return;
+                  setShortlistSelectionIds((current) => (
+                    current.includes(String(listingId))
+                      ? current.filter((value) => String(value) !== String(listingId))
+                      : [...current, String(listingId)]
+                  ));
+                  return;
+                }
+                handleRemoveFromShortlist(shortlistDeleteId);
+              }}
+              disabled={shortlistSelectionMode && !canSelectShortlistItem}
             >
-              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              <Ionicons name={shortlistSelectionMode ? (isSelected ? 'checkbox' : 'square-outline') : 'trash-outline'} size={18} color={shortlistSelectionMode && isSelected ? '#FFFFFF' : '#EF4444'} />
             </TouchableOpacity>
           )}
         </View>
@@ -2092,15 +2291,32 @@ export default function PropertyDeckScreen({ route }) {
         {renderDeckCard()}
       </View>
 
-      <TouchableOpacity
-        style={styles.flowNextButton}
-        onPress={() => setMode('shortlist')}
-      >
-        <Text style={styles.flowNextButtonText}>
-          Shortlist({selectedDeck?.shortlist.length || 0})
-        </Text>
-        <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-      </TouchableOpacity>
+      <View style={styles.deckFooterRow}>
+        <TouchableOpacity
+          style={[
+            styles.addAllFooterButton,
+            (isAddingAllToShortlist || !remainingDeckListings.length) && styles.addAllFooterButtonDisabled,
+          ]}
+          onPress={handleAddAllToShortlist}
+          activeOpacity={0.9}
+          disabled={isAddingAllToShortlist || !remainingDeckListings.length}
+        >
+          {isAddingAllToShortlist ? (
+            <ActivityIndicator size="small" color={APP_PURPLE} />
+          ) : (
+            <Text style={styles.addAllFooterButtonText}>+ Add All</Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.flowNextButton}
+          onPress={() => setMode('shortlist')}
+        >
+          <Text style={styles.flowNextButtonText}>
+            Shortlist({selectedDeck?.shortlist.length || 0})
+          </Text>
+          <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
     </>
   );
 
@@ -2159,13 +2375,44 @@ export default function PropertyDeckScreen({ route }) {
             </Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.shortlistBoardButton}
-          onPress={openDecisionBoardsForDeck}
-        >
-          <Ionicons name="git-branch-outline" size={16} color="#FFFFFF" />
-          <Text style={styles.shortlistBoardButtonText}>Decision Board</Text>
-        </TouchableOpacity>
+        <View style={styles.shortlistBoardActions}>
+          <TouchableOpacity
+            style={[styles.shortlistBoardButton, shortlistSelectionMode && styles.shortlistBoardButtonSecondary]}
+            onPress={() => {
+              if (shortlistSelectionMode) {
+                setShortlistSelectionMode(false);
+                setShortlistSelectionIds([]);
+              } else {
+                setShortlistSelectionMode(true);
+              }
+            }}
+          >
+            <Ionicons name={shortlistSelectionMode ? 'close-outline' : 'checkbox-outline'} size={16} color={shortlistSelectionMode ? APP_PURPLE : '#FFFFFF'} />
+            <Text style={[styles.shortlistBoardButtonText, shortlistSelectionMode && styles.shortlistBoardButtonTextSecondary]}>
+              {shortlistSelectionMode ? 'Cancel' : 'Select'}
+            </Text>
+          </TouchableOpacity>
+          {shortlistSelectionMode ? (
+            <TouchableOpacity
+              style={[styles.shortlistBoardButton, !selectedShortlistItems.length && styles.disabledButton]}
+              onPress={openDecisionBoardsForSelectedListings}
+              disabled={!selectedShortlistItems.length}
+            >
+              <Ionicons name="git-branch-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.shortlistBoardButtonText}>
+                Add selected{selectedShortlistItems.length ? ` (${selectedShortlistItems.length})` : ''}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.shortlistBoardButton}
+              onPress={openDecisionBoardsForDeck}
+            >
+              <Ionicons name="git-branch-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.shortlistBoardButtonText}>Decision Board</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <FlatList
@@ -3249,17 +3496,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
+  deckFooterRow: {
+    bottom: 18,
+    flexDirection: 'row',
+    gap: 10,
+    left: 18,
+    position: 'absolute',
+    right: 18,
+  },
+  addAllFooterButton: {
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderColor: APP_PURPLE,
+    borderRadius: 999,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 18,
+  },
+  addAllFooterButtonDisabled: {
+    opacity: 0.6,
+  },
+  addAllFooterButtonText: {
+    color: APP_PURPLE,
+    fontSize: 14,
+    fontWeight: '900',
+  },
   flowNextButton: {
     alignItems: 'center',
     backgroundColor: APP_PURPLE,
     borderRadius: 999,
-    bottom: 18,
     elevation: 4,
     flexDirection: 'row',
+    flex: 1,
     minHeight: 48,
     paddingHorizontal: 18,
-    position: 'absolute',
-    right: 18,
     shadowColor: '#111827',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
@@ -4267,9 +4540,48 @@ const styles = StyleSheet.create({
   shortlistDecisionButtonTextDisabled: {
     color: '#64748B',
   },
+  shortlistBoardActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  shortlistBoardButtonSecondary: {
+    backgroundColor: '#EEF2FF',
+    borderColor: APP_PURPLE,
+    borderWidth: 1,
+  },
+  shortlistBoardButtonTextSecondary: {
+    color: APP_PURPLE,
+  },
+  shortlistCheckboxButton: {
+    backgroundColor: '#EEF2FF',
+  },
+  shortlistCheckboxButtonSelected: {
+    backgroundColor: APP_PURPLE,
+  },
+  shortlistCheckboxButtonDisabled: {
+    opacity: 0.5,
+  },
+  shortlistLockedBadge: {
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    backgroundColor: '#E2E8F0',
+    borderRadius: 999,
+    flexDirection: 'row',
+    marginTop: 6,
+    minHeight: 24,
+    paddingHorizontal: 9,
+  },
+  shortlistLockedBadgeText: {
+    color: '#64748B',
+    fontSize: 10,
+    fontWeight: '900',
+    marginLeft: 5,
+    textTransform: 'uppercase',
+  },
   removeButton: {
     alignItems: 'center',
-    height: 40,
+    backgroundColor: '#FFF1F2',
     justifyContent: 'center',
     width: 34,
   },

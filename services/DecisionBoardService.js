@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './api';
 
 export const BOARD_TYPES = ['Free', 'Buyer', 'Investor', 'Developer'];
@@ -16,7 +17,17 @@ export const BOARD_LIMITS = {
   Developer: 20,
 };
 
+const DECISION_BOARD_CACHE_KEY = 'mrktfy_decision_boards_cache';
+const DECISION_BOARD_LINKED_SHORTLIST_KEY = 'mrktfy_decision_board_linked_shortlist';
+
 export const getDecisionBoardLimit = (boardType) => BOARD_LIMITS[boardType] || BOARD_LIMITS.Buyer;
+
+export const clearLocalDecisionBoardCache = async () => {
+  await Promise.all([
+    AsyncStorage.removeItem(DECISION_BOARD_CACHE_KEY),
+    AsyncStorage.removeItem(DECISION_BOARD_LINKED_SHORTLIST_KEY),
+  ]);
+};
 
 const getValue = (source, keys, fallback = null) => {
   for (const key of keys) {
@@ -364,6 +375,32 @@ const extractDecisionBoards = (data) => {
   return Array.isArray(boards) ? boards.map(normalizeDecisionBoard).filter(Boolean) : [];
 };
 
+const getBoardLinkedListingId = (boardListing) => {
+  const nestedListing = boardListing?.listing || boardListing?.Listing || boardListing?.listingSummary || boardListing?.ListingSummary || null;
+
+  return (
+    stringifyId(getValue(boardListing, ['listingId', 'ListingID'])) ||
+    stringifyId(getValue(boardListing, ['id', 'ID'])) ||
+    stringifyId(getValue(nestedListing, ['ID', 'id', 'listingId', 'ListingID']))
+  );
+};
+
+export const getDecisionBoardLinkedListingIds = async () => {
+  const boards = await getDecisionBoards();
+  const linkedIds = new Set();
+
+  boards.forEach((board) => {
+    (board.listings || []).forEach((boardListing) => {
+      const listingId = getBoardLinkedListingId(boardListing);
+      if (listingId) {
+        linkedIds.add(String(listingId));
+      }
+    });
+  });
+
+  return Array.from(linkedIds);
+};
+
 export const createDecisionBoard = async (payload = {}) => {
   const boardType = payload.boardType || payload.BoardType || 'Buyer';
   const { data } = await api.post('/api/decision-boards', compactPayload({
@@ -371,6 +408,8 @@ export const createDecisionBoard = async (payload = {}) => {
     boardType,
     status: payload.status || payload.Status || 'Active',
     maxProperties: payload.maxProperties || payload.MaxProperties || getDecisionBoardLimit(boardType),
+    propertyDeckId: payload.propertyDeckId || payload.PropertyDeckID || payload.PropertyDeckId || null,
+    shortListId: payload.shortListId || payload.ShortListID || payload.ShortlistID || payload.shortlistId || null,
   }));
   return extractDecisionBoard(data);
 };
@@ -403,7 +442,19 @@ export const updateDecisionBoard = async (decisionBoardId, payload = {}) => {
 
 export const addDecisionBoardListing = async (decisionBoardId, payload = {}) => {
   requireId(decisionBoardId, 'decisionBoardId');
-  requireId(payload.listingId ?? payload.ListingID, 'listingId');
+  const listingId = payload.listingId ?? payload.ListingID;
+  requireId(listingId, 'listingId');
+
+  const linkedListingIds = await getDecisionBoardLinkedListingIds();
+  if (linkedListingIds.includes(String(listingId))) {
+    const duplicateError = new Error('This property is already in a Decision Board. Remove it there before adding it again.');
+    duplicateError.code = 'DECISION_BOARD_DUPLICATE';
+    duplicateError.response = {
+      data: { error: duplicateError.message },
+      status: 409,
+    };
+    throw duplicateError;
+  }
 
   const { data } = await api.post(
     `/api/decision-boards/${decisionBoardId}/listings`,
@@ -411,6 +462,20 @@ export const addDecisionBoardListing = async (decisionBoardId, payload = {}) => 
   );
 
   return normalizeDecisionBoardListing(data?.decisionBoardListing || data?.listing || data);
+};
+
+export const addDecisionBoardListings = async (decisionBoardId, payloads = []) => {
+  requireId(decisionBoardId, 'decisionBoardId');
+
+  const listings = Array.isArray(payloads) ? payloads.filter(Boolean) : [];
+  if (!listings.length) return [];
+
+  const addedListings = [];
+  for (const payload of listings) {
+    addedListings.push(await addDecisionBoardListing(decisionBoardId, payload));
+  }
+
+  return addedListings;
 };
 
 export const addListingToDecisionBoardProject = async (payload = {}) => {
@@ -422,16 +487,18 @@ export const addListingToDecisionBoardProject = async (payload = {}) => {
     boardName: payload.boardName || 'Property Decisions',
     boardType: payload.boardType || 'Buyer',
     status: 'Active',
+    propertyDeckId: payload.propertyDeckId || payload.PropertyDeckID || payload.PropertyDeckId || null,
+    shortListId: payload.shortListId || payload.ShortListID || payload.ShortlistID || payload.shortlistId || null,
   });
 
-  await addDecisionBoardListing(decisionBoard.id, {
+  await addDecisionBoardListings(decisionBoard.id, [{
     listingId: payload.listingId ?? payload.ListingID,
     shortListListingId: payload.shortListListingId ?? payload.ShortListListingID,
     shortListId: payload.shortListId,
     listingStatus: payload.listingStatus || 'Active',
     trafficLightStatus: payload.trafficLightStatus || 'Green',
     userVerdict: payload.userVerdict || 'Maybe',
-  });
+  }]);
 
   return getDecisionBoard(decisionBoard.id);
 };

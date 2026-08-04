@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getBuyerPreferences,
@@ -20,6 +21,7 @@ import {
 import { recalculateShortlistRankings } from '../services/PropertyDeckService';
 
 const APP_PURPLE = '#6366F1';
+const FIRST_DECK_CREATION_RESUME_KEY = 'mrktfy-pending-first-deck-creation';
 
 const emptyForm = {
   maxBudget: '',
@@ -70,12 +72,14 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
   const scope = route?.params?.scope || 'default';
   const propertyDeckId = route?.params?.propertyDeckId || route?.params?.deckId || null;
   const deckName = route?.params?.deckName || 'this Property Deck';
+  const entryPoint = route?.params?.entryPoint || null;
   const [form, setForm] = useState(emptyForm);
   const [status, setStatus] = useState('NotStarted');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const isDeckScoped = scope === 'deck';
+  const isFirstDeckFlow = entryPoint === 'map-first-deck';
 
   const loadPreferences = useCallback(async () => {
     setLoading(true);
@@ -136,6 +140,10 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
         await recalculateShortlistRankings(propertyDeckId, 'Buyer');
       }
 
+      if (isFirstDeckFlow) {
+        await AsyncStorage.setItem(FIRST_DECK_CREATION_RESUME_KEY, 'true');
+      }
+
       setStatus(preference?.onboardingStatus || 'Completed');
       Alert.alert(
         'Preferences saved',
@@ -153,6 +161,9 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
     setSaving(true);
     try {
       const preference = await skipBuyerPreferences(propertyDeckId);
+      if (isFirstDeckFlow) {
+        await AsyncStorage.setItem(FIRST_DECK_CREATION_RESUME_KEY, 'true');
+      }
       setStatus(preference?.onboardingStatus || 'Skipped');
       Alert.alert(
         'Preferences skipped',
@@ -198,7 +209,11 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
         <View style={styles.headerText}>
           <Text style={styles.title}>Buyer Preferences</Text>
           <Text style={styles.subtitle}>
-            {isDeckScoped ? `Used for ${deckName}` : 'Default profile preferences'}
+            {isFirstDeckFlow
+              ? 'Complete these first so your first Property Deck can be optimized for you.'
+              : isDeckScoped
+                ? `Used for ${deckName}`
+                : 'Default profile preferences'}
           </Text>
         </View>
       </View>
@@ -208,7 +223,9 @@ export default function BuyerPreferencesScreen({ navigation, route }) {
           <Text style={styles.statusLabel}>Status</Text>
           <Text style={styles.statusValue}>{status}</Text>
           <Text style={styles.statusCopy}>
-            Completed preferences unlock personal fit ranking. Skipped preferences only show property ranking.
+            {isFirstDeckFlow
+              ? 'These preferences help Mrktfy rank your first Property Deck around your goals, budget, and lifestyle.'
+              : 'Completed preferences unlock personal fit ranking. Skipped preferences only show property ranking.'}
           </Text>
         </View>
 

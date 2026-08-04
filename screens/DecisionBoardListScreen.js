@@ -17,7 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import {
-  addDecisionBoardListing,
+  addDecisionBoardListings,
   BOARD_LIMITS,
   BOARD_TYPES,
   createDecisionBoard,
@@ -147,7 +147,13 @@ export default function DecisionBoardListScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { currentTier } = useSubscription();
   const listingPreviewCacheRef = useRef(new Map());
-  const pendingListing = route.params?.pendingListing || null;
+  const pendingListingsParam = route.params?.pendingListings;
+  const pendingListings = Array.isArray(pendingListingsParam) && pendingListingsParam.length
+    ? pendingListingsParam
+    : route.params?.pendingListing
+      ? [route.params.pendingListing]
+      : [];
+  const primaryPendingListing = pendingListings[0] || null;
   const pendingSource = route.params?.pendingSource || {};
   const [boards, setBoards] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -158,8 +164,8 @@ export default function DecisionBoardListScreen({ route, navigation }) {
   const boardCountLimit = getDecisionBoardCountLimit(currentTier);
 
   const pendingImageUrl = useMemo(
-    () => normalizeImageUrls(pendingListing?.ImageUrls || pendingListing?.imageUrls || pendingListing?.imageUrl)[0],
-    [pendingListing]
+    () => normalizeImageUrls(primaryPendingListing?.ImageUrls || primaryPendingListing?.imageUrls || primaryPendingListing?.imageUrl)[0],
+    [primaryPendingListing]
   );
 
   const boardPreviewSignature = useMemo(() => (
@@ -172,13 +178,39 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     }).join('|')
   ), [boards]);
 
+  const pendingListingIds = useMemo(() => (
+    pendingListings
+      .map((listing) => String(getListingId(listing) || ''))
+      .filter(Boolean)
+  ), [pendingListings]);
+  const pendingListingAlreadyLinkedIds = useMemo(() => {
+    if (!pendingListingIds.length) return [];
+
+    return pendingListingIds.filter((listingId) => (
+      boards.some((board) => (
+        (board.listings || []).some((boardListing) => getBoardListingId(boardListing) === String(listingId))
+      ))
+    ));
+  }, [boards, pendingListingIds]);
+  const pendingListingsToAdd = useMemo(() => {
+    const linkedIds = new Set(pendingListingAlreadyLinkedIds.map(String));
+    const seen = new Set();
+
+    return pendingListings.filter((listing) => {
+      const listingId = String(getListingId(listing) || '');
+      if (!listingId || linkedIds.has(listingId) || seen.has(listingId)) return false;
+      seen.add(listingId);
+      return true;
+    });
+  }, [pendingListingAlreadyLinkedIds, pendingListings]);
+
   const persistBoardsCache = useCallback((nextBoards) => {
     AsyncStorage.setItem(DECISION_BOARD_CACHE_KEY, JSON.stringify(nextBoards)).catch(() => {});
   }, []);
 
   const loadBoards = useCallback(async () => {
     let hasCachedBoards = false;
-    const shouldBlockForLoad = !pendingListing;
+    const shouldBlockForLoad = pendingListings.length === 0;
 
     try {
       const cached = await AsyncStorage.getItem(DECISION_BOARD_CACHE_KEY);
@@ -210,10 +242,10 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         setLoading(false);
       }
     }
-  }, [persistBoardsCache]);
+  }, [pendingListings.length, persistBoardsCache]);
 
   useEffect(() => {
-    if (pendingListing) return;
+    if (pendingListings.length) return;
     if (!boards.length) return;
 
     let isCancelled = false;
@@ -273,17 +305,17 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     return () => {
       isCancelled = true;
     };
-  }, [boardPreviewSignature]);
+  }, [boardPreviewSignature, pendingListings.length]);
 
   useFocusEffect(useCallback(() => {
     loadBoards();
   }, [loadBoards]));
 
   useEffect(() => {
-    if (pendingListing) {
-      setBoardName(pendingSource.suggestedBoardName || `${getListingTitle(pendingListing).split(',')[0] || 'Property'} Search`);
+    if (primaryPendingListing) {
+      setBoardName(pendingSource.suggestedBoardName || `${getListingTitle(primaryPendingListing).split(',')[0] || 'Property'} Search`);
     }
-  }, [pendingListing, pendingSource.suggestedBoardName]);
+  }, [primaryPendingListing, pendingSource.suggestedBoardName]);
 
   useEffect(() => {
     if (createModalVisible) {
@@ -303,45 +335,52 @@ export default function DecisionBoardListScreen({ route, navigation }) {
   }, [currentTier]);
 
   const addPendingListingToBoard = async (board) => {
-    const listingId = getListingId(pendingListing);
-    if (!listingId || !board?.id || savingBoardId) return;
+    if (!board?.id || savingBoardId) return;
+
+    if (!pendingListingsToAdd.length) {
+      Alert.alert('Already in Decision Board', 'These properties are already linked to a Decision Board. Open that board instead of adding them again.');
+      return;
+    }
 
     const activeCount = (board.listings || []).filter((item) => item.listingStatus !== 'Closed').length;
-    if (activeCount >= board.maxProperties) {
+    if (activeCount + pendingListingsToAdd.length > board.maxProperties) {
       Alert.alert('Board limit reached', `${board.boardType} boards can hold ${board.maxProperties} active properties.`);
       return;
     }
 
     setSavingBoardId(board.id);
     try {
-      const addedListing = await addDecisionBoardListing(board.id, {
-        listingId,
-        shortListListingId: pendingSource.shortListListingId,
-        shortListId: pendingSource.shortListId,
+      const addedListings = await addDecisionBoardListings(board.id, pendingListingsToAdd.map((listing) => ({
+        listingId: getListingId(listing),
+        shortListListingId: listing.shortListListingId || listing.ShortListListingID || listing.ShortListListingId || listing.shortlistListingId,
+        shortListId: listing.shortListId || listing.ShortListID || pendingSource.shortListId || null,
         listingStatus: 'Active',
         trafficLightStatus: 'Green',
         userVerdict: 'Maybe',
-      });
-      await persistDecisionBoardLinkedListing(listingId);
-      const nextListing = addedListing || {
-        id: `${board.id}-${listingId}`,
-        listingId,
-        listingStatus: 'Active',
-        trafficLightStatus: 'Green',
-        userVerdict: 'Maybe',
-      };
+      })));
+
+      await Promise.all(pendingListingsToAdd.map((listing) => persistDecisionBoardLinkedListing(getListingId(listing))));
+      const nextListings = addedListings.length
+        ? addedListings
+        : pendingListingsToAdd.map((listing) => ({
+          id: `${board.id}-${getListingId(listing)}`,
+          listingId: getListingId(listing),
+          listingStatus: 'Active',
+          trafficLightStatus: 'Green',
+          userVerdict: 'Maybe',
+        }));
 
       const updatedBoards = [
         {
           ...board,
-          listings: [nextListing, ...(board.listings || [])],
+          listings: [...nextListings, ...(board.listings || [])],
         },
         ...boards.filter((item) => String(item.id) !== String(board.id)),
       ];
 
       setBoards((current) => current.map((item) => (
         String(item.id) === String(board.id)
-          ? { ...item, listings: [nextListing, ...(item.listings || [])] }
+          ? { ...item, listings: [...nextListings, ...(item.listings || [])] }
           : item
       )));
       persistBoardsCache(updatedBoards);
@@ -350,7 +389,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         decisionBoardId: board.id,
         decisionBoard: {
           ...board,
-          listings: [nextListing, ...(board.listings || [])],
+          listings: [...nextListings, ...(board.listings || [])],
         },
         propertyDeckId: pendingSource.propertyDeckId || null,
       });
@@ -411,28 +450,36 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         boardType,
         status: 'Active',
         maxProperties: BOARD_LIMITS[boardType] || BOARD_LIMITS.Free,
+        propertyDeckId: pendingSource.propertyDeckId || null,
+        shortListId: pendingSource.shortListId || null,
       });
 
-      if (pendingListing) {
-        const addedListing = await addDecisionBoardListing(board.id, {
-          listingId: getListingId(pendingListing),
-          shortListListingId: pendingSource.shortListListingId,
-          shortListId: pendingSource.shortListId,
+      if (pendingListings.length) {
+        if (!pendingListingsToAdd.length) {
+          Alert.alert('Already in Decision Board', 'These properties are already linked to a Decision Board. Open that board instead of adding them again.');
+          setSavingBoardId(null);
+          return;
+        }
+
+        const addedListings = await addDecisionBoardListings(board.id, pendingListingsToAdd.map((listing) => ({
+          listingId: getListingId(listing),
+          shortListListingId: listing.shortListListingId || listing.ShortListListingId || listing.ShortListListingID || listing.shortlistListingId,
+          shortListId: listing.shortListId || listing.ShortListID || pendingSource.shortListId || null,
           listingStatus: 'Active',
           trafficLightStatus: 'Green',
           userVerdict: 'Maybe',
-        });
-        await persistDecisionBoardLinkedListing(getListingId(pendingListing));
+        })));
+        await Promise.all(pendingListingsToAdd.map((listing) => persistDecisionBoardLinkedListing(getListingId(listing))));
 
         board = {
           ...board,
-          listings: [addedListing || {
-            id: `${board.id}-${getListingId(pendingListing)}`,
-            listingId: getListingId(pendingListing),
+          listings: [...(addedListings.length ? addedListings : pendingListingsToAdd.map((listing) => ({
+            id: `${board.id}-${getListingId(listing)}`,
+            listingId: getListingId(listing),
             listingStatus: 'Active',
             trafficLightStatus: 'Green',
             userVerdict: 'Maybe',
-          }, ...(board.listings || [])],
+          }))), ...(board.listings || [])],
         };
       }
 
@@ -463,6 +510,8 @@ export default function DecisionBoardListScreen({ route, navigation }) {
     const light = getBoardLight(item);
     const activeCount = (item.listings || []).filter((listing) => listing.listingStatus !== 'Closed').length;
     const isAdding = savingBoardId === item.id;
+    const isLocked = Boolean(pendingListings.length && pendingListingsToAdd.length === 0);
+    const canAddHere = pendingListings.length ? pendingListingsToAdd.length > 0 && !isAdding : false;
 
     return (
       <View style={styles.boardCard}>
@@ -500,15 +549,21 @@ export default function DecisionBoardListScreen({ route, navigation }) {
               })}
             </View>
           </TouchableOpacity>
-          {pendingListing ? (
+          {pendingListings.length ? (
             <TouchableOpacity
-              style={[styles.addToBoardButton, isAdding && styles.disabledButton]}
+              style={[styles.addToBoardButton, (!canAddHere) && styles.disabledButton]}
               onPress={() => addPendingListingToBoard(item)}
-              disabled={isAdding}
+              disabled={!canAddHere}
             >
-              <Ionicons name="add-circle-outline" size={18} color={isAdding ? '#94A3B8' : '#FFFFFF'} />
-              <Text style={[styles.addToBoardButtonText, isAdding && styles.disabledButtonText]}>
-                {isAdding ? 'Adding...' : 'Add property to this board'}
+              <Ionicons name="add-circle-outline" size={18} color={!canAddHere ? '#94A3B8' : '#FFFFFF'} />
+              <Text style={[styles.addToBoardButtonText, (!canAddHere) && styles.disabledButtonText]}>
+                {isLocked
+                  ? 'Already in Decision Board'
+                  : isAdding
+                    ? 'Adding...'
+                    : pendingListingsToAdd.length > 1
+                      ? `Add ${pendingListingsToAdd.length} properties to this board`
+                      : 'Add property to this board'}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -534,7 +589,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      {pendingListing ? (
+      {pendingListings.length ? (
         <View style={styles.pendingPanel}>
           {pendingImageUrl ? (
             <Image source={{ uri: pendingImageUrl }} style={styles.pendingImage} />
@@ -544,9 +599,14 @@ export default function DecisionBoardListScreen({ route, navigation }) {
             </View>
           )}
           <View style={styles.pendingBody}>
-            <Text style={styles.pendingEyebrow}>Add property to Decision Board</Text>
-            <Text style={styles.pendingTitle} numberOfLines={2}>{getListingTitle(pendingListing)}</Text>
-            <Text style={styles.pendingPrice}>{String(getListingPrice(pendingListing))}</Text>
+            <Text style={styles.pendingEyebrow}>
+              {pendingListings.length > 1 ? `Add ${pendingListings.length} properties to Decision Board` : 'Add property to Decision Board'}
+            </Text>
+            <Text style={styles.pendingTitle} numberOfLines={2}>{getListingTitle(primaryPendingListing)}</Text>
+            <Text style={styles.pendingPrice}>{String(getListingPrice(primaryPendingListing))}</Text>
+            {pendingListings.length > 1 ? (
+              <Text style={styles.pendingMeta}>{pendingListings.length} selected from shortlist</Text>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -610,7 +670,7 @@ export default function DecisionBoardListScreen({ route, navigation }) {
                 disabled={savingBoardId === 'new' || !boardName.trim()}
               >
                 <Text style={[styles.modalCreateButtonText, savingBoardId === 'new' && styles.disabledButtonText]}>
-                  {pendingListing ? 'Create and add property' : 'Create board'}
+                  {pendingListings.length ? (pendingListings.length > 1 ? 'Create and add properties' : 'Create and add property') : 'Create board'}
                 </Text>
               </TouchableOpacity>
             </View>
