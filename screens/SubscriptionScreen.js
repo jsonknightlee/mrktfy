@@ -6,6 +6,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,9 +20,9 @@ const planConfig = {
   defaultInterval: "month",
   trial: {
     enabled: true,
-    durationDays: 14,
+    durationDays: 3,
     appliesToPlanKeys: ["prospector", "investor"],
-    trialCopy: "Start your 14-day free trial"
+    trialCopy: "Start your 3-day free trial"
   },
   plans: [
     {
@@ -81,14 +83,14 @@ const planConfig = {
       tagline: "Everything you need to organise your home buying journey.",
       bestFor: "Home buyers actively searching for their next home.",
       isAvailable: true,
-      badges: ["Recommended", "14-day free trial"],
+      badges: ["Recommended", "3-day free trial"],
       prices: {
         month: { "amount": 999, "display": "£9.99" },
         year: { "amount": 9999, "display": "£99.99", "subtext": "2 months free" }
       },
       trial: {
         enabled: true,
-        durationDays: 14,
+        durationDays: 3,
         isDefaultEntryPoint: true
       },
       features: [
@@ -129,7 +131,7 @@ const planConfig = {
       searchRadiusKm: 5,
       cta: {
         type: "start_trial_or_manage",
-        label: "Start 14-day free trial"
+        label: "Start 3-day free trial"
       }
     },
     {
@@ -138,14 +140,14 @@ const planConfig = {
       tagline: "Analyse opportunities and grow your portfolio.",
       bestFor: "Property investors and landlords.",
       isAvailable: true,
-      badges: ["Power User", "14-day free trial"],
+      badges: ["Power User", "3-day free trial"],
       prices: {
         month: { "amount": 2999, "display": "£29.99" },
         year: { "amount": 29999, "display": "£299.99", "subtext": "2 months free" }
       },
       trial: {
         enabled: true,
-        durationDays: 14
+        durationDays: 3
       },
       features: [
         "Everything in Buyer",
@@ -173,7 +175,7 @@ const planConfig = {
       },
       cta: {
         type: "start_trial_or_manage",
-        label: "Start 14-day free trial"
+        label: "Start 3-day free trial"
       }
     },
     {
@@ -236,6 +238,7 @@ export default function SubscriptionScreen({ navigation }) {
     false
   );
   const isAnySubscriptionActionProcessing = isCancelling || isReactivating;
+  const isIosSubscriptionManagement = Platform.OS === 'ios';
 
   const getPlanCTA = (plan) => {
     const planKey = String(plan.key || '').toLowerCase();
@@ -248,6 +251,10 @@ export default function SubscriptionScreen({ navigation }) {
     if (isCurrentPlan) {
       if (planKey === 'free') {
         return { type: 'current_plan', label: 'Get Started' };
+      }
+
+      if (isIosSubscriptionManagement) {
+        return { type: 'manage_ios', label: 'Manage in Apple' };
       }
 
       return isSubscriptionCancelled
@@ -289,6 +296,11 @@ export default function SubscriptionScreen({ navigation }) {
     }
 
     if (String(tier.key).toLowerCase() === normalizedCurrentTier) {
+      if (isIosSubscriptionManagement && normalizedCurrentTier !== 'free') {
+        handleManageIosSubscription();
+        return;
+      }
+
       if (normalizedCurrentTier !== 'free' && isSubscriptionCancelled) {
         handleReactivateSubscription(tier);
         return;
@@ -346,6 +358,19 @@ export default function SubscriptionScreen({ navigation }) {
         },
       ]
     );
+  };
+
+  const handleManageIosSubscription = async () => {
+    try {
+      const url = 'https://apps.apple.com/account/subscriptions';
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error('❌ [SUBSCRIPTION] Failed to open Apple subscription management:', error);
+      Alert.alert(
+        'Manage subscription',
+        'Open Settings > Apple ID > Subscriptions to change or cancel your plan.'
+      );
+    }
   };
 
   const handleCancelSubscription = (tier) => {
@@ -410,6 +435,7 @@ export default function SubscriptionScreen({ navigation }) {
     const isCurrentFreePlan = isCurrentPlan && normalizedCurrentTier === 'free';
     const isCurrentPaidPlan = isCurrentPlan && normalizedCurrentTier !== 'free';
     const isCancelledCurrentPlan = isCurrentPaidPlan && isSubscriptionCancelled;
+    const isManageIosPlan = isCurrentPaidPlan && isIosSubscriptionManagement;
     const isPendingFreePlan = tier.cta?.type === 'pending_free';
     const isProcessingCurrentPlan = isCurrentPaidPlan && isAnySubscriptionActionProcessing;
     const isDisabled = isComingSoon || isCurrentFreePlan || isPendingFreePlan || isProcessingCurrentPlan || (!isCurrentPaidPlan && isAnySubscriptionActionProcessing);
@@ -485,9 +511,11 @@ export default function SubscriptionScreen({ navigation }) {
             isCurrentFreePlan && styles.currentPlanButton,
             isCurrentPaidPlan && styles.cancelSubscriptionButton,
             isCancelledCurrentPlan && styles.reactivateSubscriptionButton,
+            isManageIosPlan && styles.manageIosSubscriptionButton,
             { 
               backgroundColor: isCancelledCurrentPlan
                 ? '#10B981'
+                : isManageIosPlan ? '#007AFF'
                 : isCurrentPaidPlan ? '#dc2626' : isDisabled ? '#d1d5db' : tier.key === 'free' ? '#666' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1',
               opacity: isDisabled ? 0.75 : 1
             }
@@ -549,12 +577,6 @@ export default function SubscriptionScreen({ navigation }) {
           </View>
         ))}
 
-        {/* Trial Banner */}
-        {planConfig.trial?.enabled && (
-          <View style={styles.trialBanner}>
-            <Text style={styles.trialBannerTitle}>{planConfig.trial.trialCopy}</Text>
-          </View>
-        )}
       </ScrollView>
     </View>
   );
@@ -780,6 +802,9 @@ const styles = StyleSheet.create({
   },
   reactivateSubscriptionButton: {
     shadowColor: '#065f46',
+  },
+  manageIosSubscriptionButton: {
+    shadowColor: '#1d4ed8',
   },
   subscribeButtonText: {
     color: '#fff',

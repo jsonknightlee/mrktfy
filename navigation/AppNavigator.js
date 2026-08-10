@@ -17,7 +17,6 @@ import ListingDetailScreen from '../screens/ListingDetailScreen';
 import DecisionBoardScreen from '../screens/DecisionBoardScreen';
 import DecisionBoardListingScreen from '../screens/DecisionBoardListingScreen';
 import DecisionBoardListScreen from '../screens/DecisionBoardListScreen';
-import NotificationsScreen from '../screens/NotificationsScreen';
 import NotificationListingsScreen from '../screens/NotificationListingsScreen';
 import SubscriptionScreen from '../screens/SubscriptionScreen';
 import PaymentScreen from '../screens/PaymentScreen';
@@ -26,7 +25,6 @@ import BuyerWorkspaceScreen from '../screens/BuyerWorkspaceScreen';
 import ContactAgentScreen from '../screens/ContactAgentScreen';
 
 import { AuthContext } from '../contexts/AuthContext';
-import NotificationBadge from '../components/NotificationBadge';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -68,18 +66,6 @@ function MainTabs() {
         name="AR"
         component={ARScreen}
         options={{ tabBarIcon: ({ color, size }) => <Ionicons name="camera" size={size} color={color} /> }}
-      />
-      <Tab.Screen
-        name="Notifications"
-        component={NotificationsScreen}
-        options={{ 
-          tabBarIcon: ({ color, size }) => (
-            <View style={{ position: 'relative' }}>
-              <Ionicons name="notifications" size={size} color={color} />
-              <NotificationBadge />
-            </View>
-          )
-        }}
       />
       <Tab.Screen
         name="Profile"

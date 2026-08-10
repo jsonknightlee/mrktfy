@@ -4,13 +4,17 @@ import Constants from 'expo-constants';
 import { getToken } from '../utils/tokenStorage';
 
 const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
-console.log('🔧 [API] Expo config extra:', extra);
-console.log('🔧 [API] API_BASE_URL from config:', extra.API_BASE_URL);
-console.log('🔧 [API] API_BACKUP_BASE_URL from config:', extra.API_BACKUP_BASE_URL);
-console.log('🔧 [API] API_KEY from config:', extra.API_KEY ? 'SET' : 'NOT SET');
 const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
 const API_BACKUP_BASE_URL = extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL || '';
 const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
+
+console.log('🔧 [API] Expo config extra:', extra);
+console.log('🔧 [API] Resolved API_BASE_URL:', API_BASE_URL || 'NOT SET');
+console.log('🔧 [API] Resolved API_BACKUP_BASE_URL:', API_BACKUP_BASE_URL || 'NOT SET');
+console.log('🔧 [API] API_KEY from config:', API_KEY ? 'SET' : 'NOT SET');
+if (!API_BASE_URL) {
+  console.warn('⚠️ [API] API_BASE_URL is empty. Login and API calls will fail until a production backend URL is injected.');
+}
 
 const commonHeaders = {
   'Content-Type': 'application/json',

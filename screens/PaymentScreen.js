@@ -9,9 +9,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useStripePaymentSheet, createApplePayConfig } from '../services/stripeService';
 import { useSubscription } from '../contexts/SubscriptionContext';
-import { processSubscriptionPayment, confirmSubscriptionPayment } from '../services/paymentService';
+import { processSubscriptionPayment } from '../services/paymentService';
 
 export default function PaymentScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
@@ -19,29 +18,17 @@ export default function PaymentScreen({ route, navigation }) {
   const { reloadSubscriptionData, userProfile } = useSubscription();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const [stripeIntentId, setStripeIntentId] = useState(null);
-  const [completedWithoutPaymentSheet, setCompletedWithoutPaymentSheet] = useState(false);
   const initializationStartedRef = useRef(false);
   const paymentCompletedRef = useRef(false);
-
-  const { initializePaymentSheet, openPaymentSheet, loading: sheetLoading } = useStripePaymentSheet();
 
   const price = tier?.prices?.[billingInterval];
   const isTrial = tier?.trial?.enabled && !reactivate;
   const trialDuration = tier?.trial?.durationDays;
 
-  const completeSubscriptionFlow = async (intentId = stripeIntentId, options = {}) => {
+  const completeSubscriptionFlow = async () => {
     if (paymentCompletedRef.current) return;
     paymentCompletedRef.current = true;
-    const completedAsUpgrade = options.completedWithoutPaymentSheet || completedWithoutPaymentSheet;
-
-    if (intentId && !completedAsUpgrade) {
-      const confirmation = await confirmSubscriptionPayment(intentId, tier.key, billingInterval);
-      if (!confirmation.success) {
-        paymentCompletedRef.current = false;
-        throw new Error(confirmation.error || 'Stripe confirmed payment, but subscription verification failed.');
-      }
-    }
+    const completedAsUpgrade = false;
 
     await reloadSubscriptionData();
 
@@ -65,74 +52,29 @@ export default function PaymentScreen({ route, navigation }) {
     );
   };
 
-  // Initialize payment sheet when component mounts
+  // Mark the screen ready when it mounts
   useEffect(() => {
     if (initializationStartedRef.current) return;
     initializationStartedRef.current = true;
-    initializePayment();
+    setIsReady(true);
   }, []);
 
-  const initializePayment = async () => {
+  const handlePayment = async () => {
     setIsProcessing(true);
+
     try {
       const userEmail = userProfile?.email || userProfile?.Email || 'customer@mrktfy.app';
       const userName = userProfile?.name || userProfile?.Name || userProfile?.fullName || 'Mrktfy User';
 
-      // Process subscription payment
       const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName, userProfile, { reactivate });
 
       if (!paymentResult.success) {
         throw new Error(paymentResult.error);
       }
 
-      // Create Apple Pay configuration
-      const applePayConfig = createApplePayConfig(tier, billingInterval);
-      const intentId = paymentResult.paymentIntentId || paymentResult.setupIntentId || paymentResult.subscriptionId || null;
-      setStripeIntentId(intentId);
-
-      if (!paymentResult.requiresPaymentSheet) {
-        setCompletedWithoutPaymentSheet(true);
-        await completeSubscriptionFlow(intentId, { completedWithoutPaymentSheet: true });
-        return;
-      }
-
-      // Initialize payment sheet with the payment intent and Apple Pay config
-      const { success } = await initializePaymentSheet({
-        paymentIntent: paymentResult.paymentIntent,
-        setupIntent: paymentResult.setupIntent,
-        ephemeralKey: paymentResult.ephemeralKey,
-        customer: paymentResult.customer,
-        applePayConfig,
-        primaryButtonLabel: reactivate ? 'Reactivate subscription' : isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}`,
-      });
-
-      if (success) {
-        setIsReady(true);
-      } else {
-        throw new Error('Failed to initialize payment sheet');
-      }
-    } catch (error) {
-      console.error('Payment initialization error:', error);
-      Alert.alert('Error', error.message || 'Failed to initialize payment. Please try again.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handlePayment = async () => {
-    setIsProcessing(true);
-
-    try {
-      // Open Stripe Payment Sheet
-      const { success: paymentSuccess } = await openPaymentSheet();
-
-      if (!paymentSuccess) {
-        // User cancelled or payment failed
-        return;
-      }
-
       await completeSubscriptionFlow();
     } catch (error) {
+      console.error('In-app purchase error:', error);
       Alert.alert('Payment Failed', error.message);
     } finally {
       setIsProcessing(false);
@@ -177,7 +119,7 @@ export default function PaymentScreen({ route, navigation }) {
         <Text style={styles.sectionTitle}>Payment Information</Text>
         
         <Text style={styles.paymentDescription}>
-          You'll be redirected to a secure payment form powered by Stripe.
+          Your subscription will be processed securely through the App Store or Google Play.
         </Text>
 
         {/* Security Note */}
@@ -207,11 +149,10 @@ export default function PaymentScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Powered by Stripe */}
       <View style={styles.footer}>
         <View style={styles.poweredBy}>
           <Ionicons name="card" size={16} color="#666" />
-          <Text style={styles.poweredByText}>Powered by Stripe</Text>
+          <Text style={styles.poweredByText}>Secured by App Store / Google Play</Text>
         </View>
       </View>
     </View>

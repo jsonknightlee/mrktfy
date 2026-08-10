@@ -116,6 +116,7 @@ export default function MapScreen() {
   const minValueRef = useRef('0');        // ← track exact selected VALUE
   const maxValueRef = useRef('400000');   // ← track exact selected VALUE
   const [pickerMountKey, setPickerMountKey] = useState(0);
+  const [, setTrialRefreshTick] = useState(0);
 
   // Animations & refs
   const [badgeAnim] = useState(new Animated.Value(200));
@@ -155,6 +156,15 @@ export default function MapScreen() {
     animation.start();
     return () => animation.stop();
   }, [deckBorderAnim]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTrialRefreshTick((value) => value + 1);
+    }, 60 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const hideToast = () => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);

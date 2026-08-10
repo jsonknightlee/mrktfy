@@ -4,7 +4,7 @@ import { Alert, AppState } from 'react-native';
 import { databaseService } from '../services/databaseService';
 import { getToken, deleteToken } from '../services/authService';
 import { AuthContext } from './AuthContext';
-import { cancelStripeSubscription, reactivateStripeSubscription } from '../services/paymentService';
+import { cancelStripeSubscription, reactivateStripeSubscription, syncIapSubscriptionState } from '../services/paymentService';
 
 // Helper function to get subscription price
 const getSubscriptionPrice = (tierId) => {
@@ -186,7 +186,7 @@ export const SUBSCRIPTION_PLANS = {
     },
     trial: {
       enabled: true,
-      durationDays: 14,
+      durationDays: 3,
       isDefaultEntryPoint: true
     },
     features: [
@@ -237,7 +237,7 @@ export const SUBSCRIPTION_PLANS = {
     },
     trial: {
       enabled: true,
-      durationDays: 14,
+      durationDays: 3,
     },
     features: [
       'Everything in Buyer',
@@ -515,8 +515,15 @@ export function SubscriptionProvider({ children }) {
           } catch (tokenError) {
             console.error('❌ [SUBSCRIPTION] Failed to parse token for user ID:', tokenError);
           }
+
+          try {
+            const syncResult = await syncIapSubscriptionState({ userId });
+            console.log('� [SUBSCRIPTION] IAP sync on app load result:', syncResult?.success ? 'SUCCESS' : 'NO CHANGE / FAILED');
+          } catch (syncError) {
+            console.error('❌ [SUBSCRIPTION] IAP sync on app load failed:', syncError);
+          }
           
-          console.log('🔍 [SUBSCRIPTION] Calling getUserProfile with userId:', userId);
+          console.log('� [SUBSCRIPTION] Calling getUserProfile with userId:', userId);
           
           try {
             const userProfile = await databaseService.getUserProfile(userId);
@@ -597,7 +604,16 @@ export function SubscriptionProvider({ children }) {
           const token = await getToken();
           if (token) {
             console.log('🔑 [SUBSCRIPTION] Token found after login, loading user profile from database...');
-            const userId = 'current-user';
+            let userId = 'current-user';
+
+            try {
+              const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+              userId = tokenPayload.ID || tokenPayload.userId || tokenPayload.sub || userId;
+              const syncResult = await syncIapSubscriptionState({ userId });
+              console.log('🔄 [SUBSCRIPTION] IAP sync after login result:', syncResult?.success ? 'SUCCESS' : 'NO CHANGE / FAILED');
+            } catch (syncError) {
+              console.error('❌ [SUBSCRIPTION] IAP sync after login failed:', syncError);
+            }
             
             try {
               const userProfile = await databaseService.getUserProfile(userId);
@@ -1320,8 +1336,23 @@ export function SubscriptionProvider({ children }) {
         console.log('🔄 [RELOAD] Token value (first 50 chars):', token ? token.substring(0, 50) + '...' : 'none');
         
         if (token) {
+          try {
+            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+            let userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || 'current-user';
+            const syncResult = await syncIapSubscriptionState({ userId });
+            console.log('🔄 [RELOAD] IAP sync result:', syncResult?.success ? 'SUCCESS' : 'NO CHANGE / FAILED');
+          } catch (syncError) {
+            console.error('❌ [RELOAD] IAP sync failed:', syncError);
+          }
+
           console.log('🔄 [RELOAD] Token found, loading user profile from database...');
-          const userId = 'current-user'; // This should come from your auth system
+          let userId = 'current-user'; // This should come from your auth system
+          try {
+            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+            userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || userId;
+          } catch (tokenError) {
+            console.error('❌ [RELOAD] Failed to parse token for user ID:', tokenError);
+          }
           console.log('🔄 [RELOAD] Calling getUserProfile with userId:', userId);
           
           try {

@@ -11,6 +11,7 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { databaseService } from '../services/databaseService';
 import NotificationService from '../services/NotificationService';
+import NotificationsScreen from '../screens/NotificationsScreen';
 
 const NOTIFICATIONS_OPT_IN_KEY = 'mrktfy_notifications_enabled';
 
@@ -60,7 +61,7 @@ export default function ProfileScreen({ navigation }) {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const [tab, setTab] = useState('profile'); // 'profile' | 'preferences' | 'activity' | 'settings'
+  const [tab, setTab] = useState('profile'); // 'profile' | 'preferences' | 'activity' | 'settings' | 'notifications'
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [favorites, setFavorites] = useState([]);
   const [history, setHistory] = useState([]);
@@ -300,6 +301,9 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity onPress={() => setTab('settings')} style={[styles.tab, tab==='settings' && styles.tabActive]}>
           <Text style={[styles.tabText, tab==='settings' && styles.tabTextActive]}>Settings</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setTab('notifications')} style={[styles.tab, tab==='notifications' && styles.tabActive]}>
+          <Text style={[styles.tabText, tab==='notifications' && styles.tabTextActive]}>Notifications</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
@@ -324,7 +328,7 @@ export default function ProfileScreen({ navigation }) {
                 style={styles.upgradeButton}
                 onPress={() => navigation.navigate('Subscription')}
               >
-                <Ionicons name="card" size={20} color="#007AFF" />
+                <Ionicons name="card" size={20} color="#fff" style={styles.upgradeButtonIcon} />
                 <Text style={styles.upgradeButtonText}>Manage Plan</Text>
               </TouchableOpacity>
             </View>
@@ -514,6 +518,8 @@ export default function ProfileScreen({ navigation }) {
             />
           </View>
         </View>
+      ) : tab === 'notifications' ? (
+        <NotificationsScreen />
       ) : (
         <View style={styles.activityPane}>
           {loadingActivity ? (
@@ -568,8 +574,8 @@ export default function ProfileScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', marginTop: 50 },
 
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#eee' },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', borderBottomWidth: 1, borderColor: '#eee' },
+  tab: { flex: 1, flexBasis: '33%', paddingVertical: 12, alignItems: 'center' },
   tabActive: { borderBottomWidth: 2, borderColor: '#111' },
   tabText: { fontWeight: '600', color: '#666' },
   tabTextActive: { color: '#111' },
@@ -604,13 +610,21 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start'
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    width: '100%',
+    position: 'relative'
+  },
+  upgradeButtonIcon: {
+    position: 'absolute',
+    left: 16,
   },
   upgradeButtonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
-    marginLeft: 8
+    textAlign: 'center',
+    width: '100%'
   },
 
   // Profile Section

@@ -1,7 +1,21 @@
 import { getToken } from '../utils/tokenStorage';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import { requestIapSubscription, extractReceipt, completeIapTransaction, restoreIapPurchases, getIapProductMetadata } from './iapService';
 
 const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
+
+const getPurchaseTimestamp = (purchase) => {
+  const rawTimestamp =
+    purchase?.transactionDate ||
+    purchase?.purchaseDate ||
+    purchase?.date ||
+    purchase?.transactionTime ||
+    0;
+
+  const parsed = Number(rawTimestamp);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
 
 const getPaymentConfig = () => ({
   apiBaseUrl: extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL,
@@ -253,7 +267,7 @@ export const createEphemeralKey = async (customerId) => {
   }
 };
 
-// Complete payment flow for subscription
+// Complete payment flow for subscription using native in-app purchases
 export const processSubscriptionPayment = async (tier, billingInterval, userEmail, userName, userProfile = null, options = {}) => {
   try {
     const userId = toNonEmptyString(getProfileUserId(userProfile) || await getTokenUserId());
@@ -261,83 +275,127 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
     const interval = toNonEmptyString(billingInterval);
 
     if (!userId) {
-      throw new Error('Missing userId for Stripe payment. Please sign out and sign back in.');
+      throw new Error('Missing userId for in-app purchase. Please sign out and sign back in.');
     }
 
-    const subscriptionResult = await requestPaymentJson('/api/stripe/create-subscription', {
+    if (!['prospector', 'investor'].includes(subscriptionLevelId)) {
+      throw new Error(`IAP is not configured for tier "${subscriptionLevelId}"`);
+    }
+
+    const purchase = await requestIapSubscription(subscriptionLevelId, interval, { userId });
+    if (!purchase) {
+      throw new Error('No purchase returned from App Store / Play Store.');
+    }
+
+    const receipt = await extractReceipt(purchase);
+    if (!receipt) {
+      throw new Error('Purchase completed but no receipt/purchase token was returned.');
+    }
+
+    const validationResult = await requestPaymentJson('/api/iap/validate-purchase', {
+      userId,
       tier: subscriptionLevelId,
       subscriptionLevelId,
       billingInterval: interval,
-      userId,
-      amount: tier.prices[billingInterval].amount / 100,
-      currency: 'gbp',
-      customer: {
-        email: userEmail,
-        name: userName,
-      },
-      metadata: {
-        userId,
-        subscriptionLevelId,
-        billingInterval: interval,
-        reactivate: !!options.reactivate,
-      },
+      platform: Platform.OS,
+      receipt,
+      productId: purchase.productId ?? null,
+      transactionId: purchase.transactionId ?? null,
       reactivate: !!options.reactivate,
-      trialDays: options.reactivate ? 0 : tier.trial?.enabled ? tier.trial.durationDays : 0,
-      collectPaymentMethodForTrial: options.reactivate ? false : !!tier.trial?.enabled,
     });
 
-    const normalized = normalizeSubscriptionPayment(subscriptionResult);
-    const hasExistingStripeBilling =
-      Boolean(getProfileStripeSubscriptionId(userProfile)) ||
-      Boolean(getProfileStripeCustomerId(userProfile));
-
-    const hasStripeClientSecret = Boolean(normalized.paymentIntent || normalized.setupIntent);
-    const completedWithoutNewIntent = Boolean(
-      normalized.subscriptionId &&
-      (isCompletedSubscriptionStatus(normalized.status) || hasExistingStripeBilling) &&
-      !hasStripeClientSecret
-    );
-
-    if (normalized.upgraded || completedWithoutNewIntent) {
-      return {
-        success: true,
-        requiresPaymentSheet: false,
-        upgraded: true,
-        ...normalized,
-      };
+    const normalized = normalizeSubscriptionPayment(validationResult);
+    if (!isCompletedSubscriptionStatus(normalized.status)) {
+      throw new Error(
+        validationResult?.error ||
+        'Your payment could not be verified. Please try again or contact support.'
+      );
     }
 
-    if (!hasStripeClientSecret) {
-      const missingSecretMessage = tier.trial?.enabled
-        ? 'Stripe backend created the trial but did not return a setupIntent client secret for card collection'
-        : 'Stripe backend did not return a paymentIntent client secret';
-      throw new Error(missingSecretMessage);
-    }
+    await completeIapTransaction(purchase);
 
     return {
       success: true,
-      requiresPaymentSheet: true,
+      requiresPaymentSheet: false,
       ...normalized,
     };
   } catch (error) {
-    console.error('❌ Subscription payment processing error:', error);
+    console.error('❌ In-app subscription processing error:', error);
     return { success: false, error: error.message };
   }
 };
 
-export const confirmSubscriptionPayment = async (subscriptionId, tier, billingInterval) => {
+export const syncIapSubscriptionState = async (userProfile = null) => {
   try {
-    const data = await requestPaymentJson('/api/stripe/confirm-subscription', {
-      subscriptionId,
-      tier,
-      billingInterval,
+    if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
+      return { success: true, synced: false, skipped: true, reason: 'unsupported_platform' };
+    }
+
+    const userId = toNonEmptyString(getProfileUserId(userProfile) || await getTokenUserId());
+    if (!userId) {
+      return { success: false, synced: false, skipped: true, error: 'Missing userId for IAP sync' };
+    }
+
+    const purchases = await restoreIapPurchases();
+    const relevantPurchases = (purchases || [])
+      .map((purchase) => ({
+        purchase,
+        metadata: getIapProductMetadata(purchase?.productId),
+      }))
+      .filter(({ metadata }) => Boolean(metadata));
+
+    if (!relevantPurchases.length) {
+      return { success: true, synced: false, purchases: [] };
+    }
+
+    const latest = relevantPurchases
+      .sort((a, b) => getPurchaseTimestamp(b.purchase) - getPurchaseTimestamp(a.purchase))[0];
+
+    const { purchase, metadata } = latest;
+    const receipt = await extractReceipt(purchase);
+    if (!receipt) {
+      throw new Error('Unable to read the active App Store / Play Store receipt for subscription sync.');
+    }
+
+    const validationResult = await requestPaymentJson('/api/iap/validate-purchase', {
+      userId,
+      tier: metadata.tier,
+      subscriptionLevelId: metadata.tier,
+      billingInterval: metadata.billingInterval,
+      platform: Platform.OS,
+      receipt,
+      productId: purchase.productId ?? null,
+      transactionId: purchase.transactionId ?? null,
+      reactivate: false,
+      source: 'iap-sync',
     });
 
-    return { success: true, data };
+    const normalized = normalizeSubscriptionPayment(validationResult);
+    if (!isCompletedSubscriptionStatus(normalized.status)) {
+      return {
+        success: false,
+        synced: false,
+        error: validationResult?.error || 'IAP subscription sync could not be verified.',
+      };
+    }
+
+    return {
+      success: true,
+      synced: true,
+      purchase,
+      metadata,
+      ...normalized,
+    };
   } catch (error) {
-    console.error('❌ Subscription confirmation error:', error);
-    return { success: false, error: error.message };
+    console.error('❌ IAP subscription sync error:', error);
+    return { success: false, synced: false, error: error.message };
   }
+};
+
+export const confirmSubscriptionPayment = async () => {
+  // Legacy Stripe confirmation step; no longer used with in-app purchases.
+  // Kept for backwards compatibility in case older call sites still import it.
+  return { success: true, data: {} };
 };
 
 export const cancelStripeSubscription = async ({
@@ -346,7 +404,7 @@ export const cancelStripeSubscription = async ({
   cancelAtPeriodEnd = true,
 } = {}) => {
   try {
-    const data = await requestPaymentJson('/api/stripe/cancel-subscription', {
+    const data = await requestPaymentJson('/api/subscriptions/cancel', {
       userId: toNonEmptyString(userId),
       subscriptionId: toNonEmptyString(subscriptionId),
       cancelAtPeriodEnd,
@@ -354,7 +412,7 @@ export const cancelStripeSubscription = async ({
 
     return { success: true, data };
   } catch (error) {
-    console.error('❌ Stripe subscription cancellation error:', error);
+    console.error('❌ Subscription cancellation error:', error);
     return { success: false, error: error.message };
   }
 };
@@ -364,13 +422,13 @@ export const reactivateStripeSubscription = async ({
   subscriptionId,
 } = {}) => {
   try {
-    const data = await requestPaymentJson('/api/stripe/reactivate-subscription', {
+    const data = await requestPaymentJson('/api/subscriptions/reactivate', {
       userId: toNonEmptyString(userId),
       subscriptionId: toNonEmptyString(subscriptionId),
     });
     return { success: true, data };
   } catch (error) {
-    console.error('Stripe subscription reactivation error:', error);
+    console.error('Subscription reactivation error:', error);
     return { success: false, error: error.message };
   }
 };
