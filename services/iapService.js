@@ -184,7 +184,7 @@ export const requestIapSubscription = async (tier, billingInterval, options = {}
     const request = {
       sku,
       andDangerouslyFinishTransactionAutomaticallyIOS: false,
-      ...(options.userId ? { appAccountToken: options.userId } : {}),
+      ...(options.appAccountToken || options.userId ? { appAccountToken: options.appAccountToken || options.userId } : {}),
     };
 
     const purchase = await requestSubscription(request);

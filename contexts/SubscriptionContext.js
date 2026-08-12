@@ -67,14 +67,23 @@ const loadSubscriptionState = async () => {
 };
 
 const isProfileInTrial = (userProfile) => {
+  const trialStartDate = userProfile?.TrialStartDate || userProfile?.trialStartDate;
+  const trialEndDate = userProfile?.TrialEndDate || userProfile?.trialEndDate;
+
+  if (trialStartDate && trialEndDate) {
+    const start = new Date(trialStartDate);
+    const end = new Date(trialEndDate);
+
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+      const now = new Date();
+      return now >= start && now <= end;
+    }
+  }
+
   const explicitTrial = userProfile?.IsInTrial ?? userProfile?.isInTrial;
   if (explicitTrial != null) return Boolean(explicitTrial);
 
-  const subscriptionStatus = userProfile?.SubscriptionStatus || userProfile?.subscriptionStatus;
-  if (String(subscriptionStatus || '').toLowerCase() === 'trialing') return true;
-
-  const trialEndDate = userProfile?.TrialEndDate || userProfile?.trialEndDate;
-  return trialEndDate ? new Date(trialEndDate) > new Date() : false;
+  return false;
 };
 
 // Check subscription validity and handle expiration
@@ -104,16 +113,18 @@ const checkSubscriptionValidity = async (subscriptionState) => {
       
       // Update database to free tier
       try {
+        let userId = state.userProfile?.UserID || state.userProfile?.userId || state.userProfile?.UserId || 'current-user';
         const token = await getToken();
         if (token) {
-          await databaseService.updateUserSubscription({
-            SubscriptionLevelID: 'free',
-            SubscriptionStartDate: now.toISOString(),
-            SubscriptionEndDate: null,
-            IsSubscriptionActive: true,
-            AutoRenew: false
-          });
+          try {
+            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+            userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || userId;
+          } catch (tokenError) {
+            console.error('❌ [SUBSCRIPTION] Failed to parse token for expired subscription userId:', tokenError);
+          }
         }
+
+        await databaseService.updateUserSubscription(userId, 'free');
       } catch (error) {
         console.error('❌ [SUBSCRIPTION] Failed to update expired subscription in database:', error);
       }
@@ -1007,7 +1018,7 @@ export function SubscriptionProvider({ children }) {
         }
 
         await clearSubscriptionStorage();
-        await value.reloadSubscriptionData();
+        await value.reloadSubscriptionData({ syncIap: false });
 
         console.log('🚫 [SUBSCRIPTION] Stripe cancellation completed');
         return true;
@@ -1060,7 +1071,7 @@ export function SubscriptionProvider({ children }) {
         }
 
         await clearSubscriptionStorage();
-        await value.reloadSubscriptionData();
+        await value.reloadSubscriptionData({ syncIap: false });
 
         console.log('[SUBSCRIPTION] Stripe reactivation completed');
         return true;
@@ -1137,9 +1148,28 @@ export function SubscriptionProvider({ children }) {
     },
     // Get current subscription level details
     getCurrentSubscriptionLevel: () => {
-      return state.subscriptionLevels.find(
-        level => (level.id?.toLowerCase() === state.currentTier?.toLowerCase()) || (level.ID?.toLowerCase() === state.currentTier?.toLowerCase())
+      const normalizedTier = String(state.currentTier || 'free').toLowerCase();
+      const matchedLevel = state.subscriptionLevels.find(
+        level => (level.id?.toLowerCase() === normalizedTier) || (level.ID?.toLowerCase() === normalizedTier)
       );
+
+      if (matchedLevel) {
+        return matchedLevel;
+      }
+
+      const fallbackPlan = SUBSCRIPTION_PLANS[normalizedTier] || SUBSCRIPTION_PLANS.free;
+      return {
+        ...fallbackPlan,
+        id: fallbackPlan.id,
+        ID: fallbackPlan.id,
+        name: fallbackPlan.name,
+        Name: fallbackPlan.name,
+        searchRadiusKm: fallbackPlan.searchRadiusKm || 2,
+        limits: fallbackPlan.limits || {},
+        Limits: fallbackPlan.limits || {},
+        features: fallbackPlan.features || [],
+        Features: fallbackPlan.features || [],
+      };
     },
     // Ad-related functions
     shouldShowAd: (action) => {
@@ -1181,7 +1211,7 @@ export function SubscriptionProvider({ children }) {
     },
     // Trial management functions
     getTrialStatus: () => {
-      if (!state.isInTrial || !state.trialEndDate) {
+      if (!state.trialStartDate || !state.trialEndDate) {
         return {
           isInTrial: false,
           trialStartDate: null,
@@ -1192,12 +1222,25 @@ export function SubscriptionProvider({ children }) {
       }
       
       const now = new Date();
+      const trialStart = new Date(state.trialStartDate);
       const trialEnd = new Date(state.trialEndDate);
+      const hasValidDates = !Number.isNaN(trialStart.getTime()) && !Number.isNaN(trialEnd.getTime());
+      if (!hasValidDates) {
+        return {
+          isInTrial: false,
+          trialStartDate: null,
+          trialEndDate: null,
+          daysRemaining: 0,
+          isExpired: false,
+        };
+      }
+
+      const isInTrial = now >= trialStart && now <= trialEnd;
       const isExpired = now > trialEnd;
       const daysRemaining = isExpired ? 0 : Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
       
       return {
-        isInTrial: !isExpired,
+        isInTrial,
         trialStartDate: state.trialStartDate,
         trialEndDate: state.trialEndDate,
         daysRemaining,
@@ -1326,8 +1369,9 @@ export function SubscriptionProvider({ children }) {
         return false;
       }
     },
-    reloadSubscriptionData: async () => {
+    reloadSubscriptionData: async (options = {}) => {
       try {
+        const { syncIap = true } = options;
         console.log('🔄 [RELOAD] reloadSubscriptionData: Starting reload...');
         
         // Try to load user profile first - this will override AsyncStorage if user is logged in
@@ -1336,13 +1380,17 @@ export function SubscriptionProvider({ children }) {
         console.log('🔄 [RELOAD] Token value (first 50 chars):', token ? token.substring(0, 50) + '...' : 'none');
         
         if (token) {
-          try {
-            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
-            let userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || 'current-user';
-            const syncResult = await syncIapSubscriptionState({ userId });
-            console.log('🔄 [RELOAD] IAP sync result:', syncResult?.success ? 'SUCCESS' : 'NO CHANGE / FAILED');
-          } catch (syncError) {
-            console.error('❌ [RELOAD] IAP sync failed:', syncError);
+          if (syncIap) {
+            try {
+              const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+              let userId = tokenPayload.ID || tokenPayload.UserID || tokenPayload.userId || tokenPayload.sub || 'current-user';
+              const syncResult = await syncIapSubscriptionState({ userId });
+              console.log('🔄 [RELOAD] IAP sync result:', syncResult?.success ? 'SUCCESS' : 'NO CHANGE / FAILED');
+            } catch (syncError) {
+              console.error('❌ [RELOAD] IAP sync failed:', syncError);
+            }
+          } else {
+            console.log('🔄 [RELOAD] Skipping IAP sync for manual subscription update reload');
           }
 
           console.log('🔄 [RELOAD] Token found, loading user profile from database...');

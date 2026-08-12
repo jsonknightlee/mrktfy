@@ -1,16 +1,9 @@
 // screens/auth/RegisterScreen.js
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
-import { registerUser, loginWithGoogle, loginWithApple, fetchUserProfile } from '../../services/authApi';
+import React, { useState } from 'react';
+import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { registerUser } from '../../services/authApi';
 import { saveToken } from '../../utils/tokenStorage';
 import { AuthContext } from '../../contexts/AuthContext';
-
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import * as AppleAuthentication from 'expo-apple-authentication';
-import { Ionicons } from '@expo/vector-icons';
-
-WebBrowser.maybeCompleteAuthSession();
 
 export default function RegisterScreen({ navigation }) {
   const [form, setForm] = useState({
@@ -21,72 +14,7 @@ export default function RegisterScreen({ navigation }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
-  const baseGoogleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
-    || '771793399175-22gdh9qseqj1k38ud849u2iqi820fabp.apps.googleusercontent.com';
-  const androidGoogleClientId = process.env.EXPO_PUBLIC_ANDROID_GOOGLE_CLIENT_ID || baseGoogleClientId;
-  const iosGoogleClientId = process.env.EXPO_PUBLIC_IOS_GOOGLE_CLIENT_ID || baseGoogleClientId;
-
-  // --- Google Auth ---
-  const androidNativeRedirectUri = useMemo(() => {
-    if (!androidGoogleClientId) return undefined;
-    return `com.googleusercontent.apps.${androidGoogleClientId.replace('.apps.googleusercontent.com', '')}:/oauthredirect`;
-  }, [androidGoogleClientId]);
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: iosGoogleClientId,
-    androidClientId: androidGoogleClientId,
-    scopes: ['openid', 'profile', 'email'],
-    redirectUri: Platform.OS === 'android' ? androidNativeRedirectUri : undefined,
-  });
-
-  useEffect(() => {
-    const handleGoogleLogin = async () => {
-      if (response?.type !== 'success') return;
-      try {
-        const accessToken = response.authentication?.accessToken;
-        if (!accessToken) {
-          throw new Error('Google did not return an access token.');
-        }
-
-        const token = await loginWithGoogle(accessToken);
-        await saveToken(token);
-        const user = await fetchUserProfile(token);
-        Alert.alert('Welcome', `Hello ${user.Firstname}!`);
-        if (typeof signIn === 'function') await signIn(token);
-        else setIsLoggedIn?.(true);
-      } catch (err) {
-        console.error('❌ [GOOGLE SIGNUP] Error:', err);
-        console.error('❌ [GOOGLE SIGNUP] Response:', response);
-        console.error('❌ [GOOGLE SIGNUP] Authentication:', response?.authentication);
-        console.error('❌ [GOOGLE SIGNUP] Error response:', err?.response?.data);
-        console.error('❌ [GOOGLE SIGNUP] Error status:', err?.response?.status);
-        console.error('❌ [GOOGLE SIGNUP] Error message:', err?.message);
-        const msg = err?.response?.data?.error || err?.message || 'Could not sign up with Google';
-        Alert.alert('Google Sign Up Failed', msg);
-      }
-    };
-    handleGoogleLogin();
-  }, [response, signIn, setIsLoggedIn]);
-
-  const handleAppleLogin = async () => {
-    try {
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      const token = await loginWithApple(credential.identityToken, credential.fullName);
-      await saveToken(token);
-      const user = await fetchUserProfile(token);
-      Alert.alert('Welcome', `Hello ${user.Firstname}!`);
-      if (typeof signIn === 'function') await signIn(token);
-      else setIsLoggedIn?.(true);
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Apple Sign Up Failed', 'Could not sign up with Apple');
-    }
-  };
+  
 
   const handleChange = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
 
@@ -179,33 +107,6 @@ export default function RegisterScreen({ navigation }) {
       <TouchableOpacity onPress={() => !submitting && navigation.navigate('Login')}>
         <Text style={styles.link}>Already have an account? Log in</Text>
       </TouchableOpacity>
-
-      <View style={styles.divider} />
-
-      <TouchableOpacity
-        style={styles.oauthBtn}
-        onPress={() =>
-          !submitting
-          && request
-          && promptAsync({
-            useProxy: false,
-            redirectUri: Platform.OS === 'android' ? androidNativeRedirectUri : undefined,
-          })}
-        disabled={submitting || !request}
-      >
-        <Ionicons name="logo-google" size={20} color="#fff" style={{ marginRight: 8 }} />
-        <Text style={styles.oauthText}>Sign up with Google</Text>
-      </TouchableOpacity>
-
-      {Platform.OS === 'ios' && (
-        <AppleAuthentication.AppleAuthenticationButton
-          buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-          cornerRadius={6}
-          style={{ width: '100%', height: 44, marginTop: 12 }}
-          onPress={() => !submitting && handleAppleLogin()}
-        />
-      )}
     </View>
   );
 }
@@ -231,14 +132,4 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
   link: { color: '#007AFF', textAlign: 'center', marginTop: 8 },
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 16 },
-  oauthBtn: {
-    backgroundColor: '#DB4437',
-    paddingVertical: 12,
-    borderRadius: 6,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  oauthText: { color: '#fff', fontWeight: 'bold' },
 });

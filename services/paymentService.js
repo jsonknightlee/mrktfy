@@ -1,4 +1,6 @@
 import { getToken } from '../utils/tokenStorage';
+import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { requestIapSubscription, extractReceipt, completeIapTransaction, restoreIapPurchases, getIapProductMetadata } from './iapService';
@@ -213,6 +215,74 @@ const getProfileStripeCustomerId = (userProfile) => (
   null
 );
 
+const IAP_CUSTOMER_TOKEN_PREFIX = 'iap_customer_token';
+
+const isUuidLike = (value) => {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value).trim());
+};
+
+const generateIapCustomerToken = () => {
+  if (typeof Crypto.randomUUID === 'function') {
+    return Crypto.randomUUID();
+  }
+
+  if (globalThis?.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.random() * 16 | 0;
+    const value = char === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
+const getIapCustomerStorageKey = (userId) => `${IAP_CUSTOMER_TOKEN_PREFIX}:${toNonEmptyString(userId) || 'current-user'}`;
+
+const resolveIapCustomerToken = async (userProfile = null, userId = null) => {
+  if (Platform.OS !== 'ios') {
+    return null;
+  }
+
+  const profileToken = toNonEmptyString(
+    userProfile?.IAPCustomerID ||
+    userProfile?.iapCustomerId ||
+    userProfile?.IAPCustomerId ||
+    userProfile?.appAccountToken
+  );
+
+  if (isUuidLike(profileToken)) {
+    const storageKey = getIapCustomerStorageKey(userId || getProfileUserId(userProfile) || await getTokenUserId());
+    try {
+      await SecureStore.setItemAsync(storageKey, profileToken);
+    } catch (error) {
+      console.warn('⚠️ Unable to cache backend IAP customer token:', error.message);
+    }
+    return profileToken;
+  }
+
+  const resolvedUserId = toNonEmptyString(userId || getProfileUserId(userProfile) || await getTokenUserId());
+  if (!resolvedUserId) {
+    return null;
+  }
+
+  const storageKey = getIapCustomerStorageKey(resolvedUserId);
+  try {
+    const storedToken = toNonEmptyString(await SecureStore.getItemAsync(storageKey));
+    if (isUuidLike(storedToken)) {
+      return storedToken;
+    }
+
+    const generatedToken = generateIapCustomerToken();
+    await SecureStore.setItemAsync(storageKey, generatedToken);
+    return generatedToken;
+  } catch (error) {
+    console.warn('⚠️ Unable to resolve IAP customer token from storage:', error.message);
+    return generateIapCustomerToken();
+  }
+};
+
 const toNonEmptyString = (value) => {
   if (value == null) return null;
 
@@ -273,6 +343,7 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
     const userId = toNonEmptyString(getProfileUserId(userProfile) || await getTokenUserId());
     const subscriptionLevelId = toNonEmptyString(tier.key);
     const interval = toNonEmptyString(billingInterval);
+    const appAccountToken = await resolveIapCustomerToken(userProfile, userId);
 
     if (!userId) {
       throw new Error('Missing userId for in-app purchase. Please sign out and sign back in.');
@@ -282,7 +353,7 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
       throw new Error(`IAP is not configured for tier "${subscriptionLevelId}"`);
     }
 
-    const purchase = await requestIapSubscription(subscriptionLevelId, interval, { userId });
+    const purchase = await requestIapSubscription(subscriptionLevelId, interval, { appAccountToken });
     if (!purchase) {
       throw new Error('No purchase returned from App Store / Play Store.');
     }
@@ -301,6 +372,7 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
       receipt,
       productId: purchase.productId ?? null,
       transactionId: purchase.transactionId ?? null,
+      appAccountToken,
       reactivate: !!options.reactivate,
     });
 
@@ -332,6 +404,7 @@ export const syncIapSubscriptionState = async (userProfile = null) => {
     }
 
     const userId = toNonEmptyString(getProfileUserId(userProfile) || await getTokenUserId());
+    const appAccountToken = await resolveIapCustomerToken(userProfile, userId);
     if (!userId) {
       return { success: false, synced: false, skipped: true, error: 'Missing userId for IAP sync' };
     }
@@ -366,6 +439,7 @@ export const syncIapSubscriptionState = async (userProfile = null) => {
       receipt,
       productId: purchase.productId ?? null,
       transactionId: purchase.transactionId ?? null,
+      appAccountToken,
       reactivate: false,
       source: 'iap-sync',
     });

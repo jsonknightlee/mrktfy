@@ -6,8 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Linking,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -230,6 +228,16 @@ export default function SubscriptionScreen({ navigation }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
   const normalizedCurrentTier = String(currentTier || 'free').toLowerCase();
+  const subscriptionEndDateValue = userProfile?.SubscriptionEndDate || userProfile?.subscriptionEndDate || null;
+  const subscriptionEndDate = subscriptionEndDateValue ? new Date(subscriptionEndDateValue) : null;
+  const isSubscriptionActive = Boolean(
+    userProfile?.IsSubscriptionActive ??
+    userProfile?.isSubscriptionActive ??
+    false
+  );
+  const isSubscriptionExpired = Boolean(
+    subscriptionEndDate && !Number.isNaN(subscriptionEndDate.getTime()) && subscriptionEndDate <= new Date()
+  );
   const isSubscriptionCancelled = Boolean(
     userProfile?.IsCancelled ??
     userProfile?.isCancelled ??
@@ -238,11 +246,27 @@ export default function SubscriptionScreen({ navigation }) {
     false
   );
   const isAnySubscriptionActionProcessing = isCancelling || isReactivating;
-  const isIosSubscriptionManagement = Platform.OS === 'ios';
+  const activePaidPlanName = planConfig.plans.find((plan) => String(plan.key || '').toLowerCase() === normalizedCurrentTier)?.name || 'Buyer';
+
+  const formatSubscriptionEndDate = (value) => {
+    if (!value) return null;
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+
+    return new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(date);
+  };
 
   const getPlanCTA = (plan) => {
     const planKey = String(plan.key || '').toLowerCase();
     const isCurrentPlan = planKey === normalizedCurrentTier;
+    const price = plan.prices?.[billingInterval];
+    const canRenewCurrentPlan = isCurrentPlan && planKey !== 'free' && (isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive);
+    const canCancelCurrentPlan = isCurrentPlan && planKey !== 'free' && isSubscriptionActive && !isSubscriptionExpired && !isSubscriptionCancelled;
 
     if (!plan.isAvailable) {
       return { type: 'coming_soon', label: 'Coming soon' };
@@ -250,26 +274,24 @@ export default function SubscriptionScreen({ navigation }) {
 
     if (isCurrentPlan) {
       if (planKey === 'free') {
-        return { type: 'current_plan', label: 'Get Started' };
+        return { type: 'current_plan', label: 'Current plan' };
       }
 
-      if (isIosSubscriptionManagement) {
-        return { type: 'manage_ios', label: 'Manage in Apple' };
+      if (canRenewCurrentPlan) {
+        return { type: 'renew', label: `Renew: ${price.display}` };
       }
 
-      return isSubscriptionCancelled
-        ? { type: 'reactivate', label: 'Reactivate subscription' }
-        : { type: 'cancel', label: 'Cancel subscription' };
+      if (canCancelCurrentPlan) {
+        return { type: 'cancel', label: 'Cancel subscription' };
+      }
+
+      return { type: 'current_plan', label: 'Current plan' };
     }
 
     if (planKey === 'free') {
-      return isSubscriptionCancelled
-        ? { type: 'pending_free', label: 'Free after current period' }
-        : { type: 'cancel_to_free', label: 'Cancel to Free' };
-    }
-
-    if (plan.trial?.enabled) {
-      return { type: 'trial', label: `Start ${plan.trial.durationDays}-day trial` };
+      return normalizedCurrentTier === 'free'
+        ? { type: 'current_plan', label: 'Current plan' }
+        : { type: 'cancel_to_free', label: 'Subscribe to Free' };
     }
 
     return { type: 'subscribe', label: `Subscribe to ${plan.name}` };
@@ -296,29 +318,24 @@ export default function SubscriptionScreen({ navigation }) {
     }
 
     if (String(tier.key).toLowerCase() === normalizedCurrentTier) {
-      if (isIosSubscriptionManagement && normalizedCurrentTier !== 'free') {
-        handleManageIosSubscription();
+      if (normalizedCurrentTier === 'free') {
+        Alert.alert('Free plan', 'You are already on the Free plan.');
         return;
       }
 
-      if (normalizedCurrentTier !== 'free' && isSubscriptionCancelled) {
+      if (isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive) {
         handleReactivateSubscription(tier);
         return;
       }
 
-      if (normalizedCurrentTier !== 'free' && !isSubscriptionCancelled) {
+      if (normalizedCurrentTier !== 'free') {
         handleCancelSubscription(tier);
+        return;
       }
-      return;
     }
 
     if (tier.key === 'free') {
       if (normalizedCurrentTier !== 'free') {
-        if (isSubscriptionCancelled) {
-          Alert.alert('Already scheduled', 'Your paid subscription is already set to end at the current billing period.');
-          return;
-        }
-
         handleCancelSubscription({ ...tier, name: 'paid plan' });
         return;
       }
@@ -342,7 +359,7 @@ export default function SubscriptionScreen({ navigation }) {
       : `You've selected the ${tier.name} plan at ${price.display}${billingInterval === 'month' ? '/month' : '/year'}.\n\nThis will redirect to payment processing.`;
 
     Alert.alert(
-      tier.trial?.enabled ? 'Start Free Trial' : 'Subscribe to ' + tier.name,
+      'Subscribe to ' + tier.name,
       message,
       [
         {
@@ -360,23 +377,20 @@ export default function SubscriptionScreen({ navigation }) {
     );
   };
 
-  const handleManageIosSubscription = async () => {
-    try {
-      const url = 'https://apps.apple.com/account/subscriptions';
-      await Linking.openURL(url);
-    } catch (error) {
-      console.error('❌ [SUBSCRIPTION] Failed to open Apple subscription management:', error);
-      Alert.alert(
-        'Manage subscription',
-        'Open Settings > Apple ID > Subscriptions to change or cancel your plan.'
-      );
-    }
-  };
-
   const handleCancelSubscription = (tier) => {
+    const subscriptionEndDateLabel = formatSubscriptionEndDate(subscriptionEndDateValue);
+    const paidPlanName = tier?.name || activePaidPlanName;
+    const cancelMessage = subscriptionEndDateLabel
+      ? `You will keep access to your ${paidPlanName} subscription until ${subscriptionEndDateLabel}.
+
+After that, your subscription will automatically return to Free.`
+      : `You will keep access to your ${paidPlanName} subscription until the end of the current billing period.
+
+After that, your subscription will automatically return to Free.`;
+
     Alert.alert(
       'Cancel subscription',
-      `Cancel your ${tier.name} subscription at the end of the current billing period?`,
+      cancelMessage,
       [
         { text: 'Keep subscription', style: 'cancel' },
         {
@@ -387,7 +401,7 @@ export default function SubscriptionScreen({ navigation }) {
             try {
               const success = await cancelSubscription();
               if (success) {
-                await reloadSubscriptionData();
+                await reloadSubscriptionData({ syncIap: false });
                 Alert.alert('Subscription cancelled', 'Your subscription has been updated.');
               } else {
                 Alert.alert('Cancellation failed', 'Please try again.');
@@ -402,26 +416,40 @@ export default function SubscriptionScreen({ navigation }) {
   };
 
   const handleReactivateSubscription = (tier) => {
+    const canUseBackendReactivation = Boolean(
+      isSubscriptionCancelled &&
+      subscriptionEndDate &&
+      !Number.isNaN(subscriptionEndDate.getTime()) &&
+      subscriptionEndDate > new Date()
+    );
+
     Alert.alert(
-      'Reactivate subscription',
-      `Reactivate your ${tier.name} subscription? Your original trial and billing dates will be reused.`,
+      'Renew subscription',
+      canUseBackendReactivation
+        ? `Reactivate your ${tier.name} subscription before the current billing period ends?`
+        : `Renew your ${tier.name} subscription by starting a new purchase?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reactivate',
+          text: 'Renew',
           onPress: async () => {
-            setIsReactivating(true);
-            try {
-              const success = await reactivateSubscription();
-              if (success) {
-                await reloadSubscriptionData();
-                Alert.alert('Subscription reactivated', 'Your subscription has been reactivated.');
-              } else {
-                Alert.alert('Reactivation failed', 'Please try again.');
+            if (canUseBackendReactivation) {
+              setIsReactivating(true);
+              try {
+                const success = await reactivateSubscription();
+                if (success) {
+                  await reloadSubscriptionData({ syncIap: false });
+                  Alert.alert('Subscription renewed', 'Your subscription has been updated.');
+                } else {
+                  Alert.alert('Renewal failed', 'Please try again.');
+                }
+              } finally {
+                setIsReactivating(false);
               }
-            } finally {
-              setIsReactivating(false);
+              return;
             }
+
+            navigation.navigate('Payment', { tier, billingInterval });
           },
         },
       ]
@@ -434,11 +462,9 @@ export default function SubscriptionScreen({ navigation }) {
     const isCurrentPlan = String(tier.key).toLowerCase() === normalizedCurrentTier;
     const isCurrentFreePlan = isCurrentPlan && normalizedCurrentTier === 'free';
     const isCurrentPaidPlan = isCurrentPlan && normalizedCurrentTier !== 'free';
-    const isCancelledCurrentPlan = isCurrentPaidPlan && isSubscriptionCancelled;
-    const isManageIosPlan = isCurrentPaidPlan && isIosSubscriptionManagement;
-    const isPendingFreePlan = tier.cta?.type === 'pending_free';
+    const isCancelledCurrentPlan = isCurrentPaidPlan && (isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive);
     const isProcessingCurrentPlan = isCurrentPaidPlan && isAnySubscriptionActionProcessing;
-    const isDisabled = isComingSoon || isCurrentFreePlan || isPendingFreePlan || isProcessingCurrentPlan || (!isCurrentPaidPlan && isAnySubscriptionActionProcessing);
+    const isDisabled = isComingSoon || (isCurrentFreePlan && tier.cta?.type === 'current_plan') || isProcessingCurrentPlan || (!isCurrentPaidPlan && isAnySubscriptionActionProcessing);
     
     return (
       <View
@@ -511,11 +537,9 @@ export default function SubscriptionScreen({ navigation }) {
             isCurrentFreePlan && styles.currentPlanButton,
             isCurrentPaidPlan && styles.cancelSubscriptionButton,
             isCancelledCurrentPlan && styles.reactivateSubscriptionButton,
-            isManageIosPlan && styles.manageIosSubscriptionButton,
             { 
               backgroundColor: isCancelledCurrentPlan
                 ? '#10B981'
-                : isManageIosPlan ? '#007AFF'
                 : isCurrentPaidPlan ? '#dc2626' : isDisabled ? '#d1d5db' : tier.key === 'free' ? '#666' : tier.key === 'prospector' ? '#007AFF' : tier.key === 'investor' ? '#10B981' : '#6366F1',
               opacity: isDisabled ? 0.75 : 1
             }
@@ -802,9 +826,6 @@ const styles = StyleSheet.create({
   },
   reactivateSubscriptionButton: {
     shadowColor: '#065f46',
-  },
-  manageIosSubscriptionButton: {
-    shadowColor: '#1d4ed8',
   },
   subscribeButtonText: {
     color: '#fff',

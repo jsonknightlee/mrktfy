@@ -68,6 +68,23 @@ const computeEndDate = ({ platform, tier, billingInterval, isTrial }) => {
   return periodEnd;
 };
 
+const toNonEmptyString = (value) => {
+  if (value == null) return null;
+  const stringValue = String(value).trim();
+  return stringValue.length ? stringValue : null;
+};
+
+const resolveIapCustomerToken = (body = {}) => (
+  toNonEmptyString(
+    body.appAccountToken ||
+    body.IAPCustomerID ||
+    body.iapCustomerID ||
+    body.iapCustomerId ||
+    body.customerToken ||
+    body.customerId
+  )
+);
+
 // -------------------------------------------------------------------------
 // Apple receipt validation
 // -------------------------------------------------------------------------
@@ -160,11 +177,17 @@ router.post('/api/iap/validate-purchase', async (req, res) => {
       receipt,
       productId,
       transactionId,
+      appAccountToken: rawAppAccountToken,
       reactivate,
     } = req.body;
+    const appAccountToken = resolveIapCustomerToken({ ...req.body, appAccountToken: rawAppAccountToken });
 
     if (!userId || !tier || !billingInterval || !platform) {
       return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    if (platform === 'ios' && !appAccountToken) {
+      return res.status(400).json({ error: 'appAccountToken is required for iOS subscription validation' });
     }
 
     let validation;
@@ -185,23 +208,50 @@ router.post('/api/iap/validate-purchase', async (req, res) => {
 
     const validatedProductId = validation.productId || productId;
     const validatedTier = tierFromProductId(validatedProductId) || tier;
+    const resolvedSubscriptionId = validation.transactionId || transactionId || null;
 
     const isTrial = !reactivate && validation.isTrial;
     const endDate = computeEndDate({ platform, tier: validatedTier, billingInterval, isTrial });
 
+    if (platform === 'ios' && resolvedSubscriptionId) {
+      const existingBinding = await db.query(
+        `SELECT TOP 1 UserID, IAPCustomerID, IAPSubscriptionID
+         FROM Profile
+         WHERE IAPSubscriptionID = @subscriptionId
+            OR (IAPCustomerID IS NOT NULL AND IAPCustomerID = @appAccountToken)`,
+        [
+          { name: 'subscriptionId', value: resolvedSubscriptionId },
+          { name: 'appAccountToken', value: appAccountToken },
+        ]
+      );
+
+      const boundProfile = existingBinding?.recordset?.[0] || null;
+      if (boundProfile && String(boundProfile.UserID) !== String(userId)) {
+        return res.status(409).json({
+          error: 'This Apple subscription is already linked to another account. Please use the original account that purchased it.',
+          conflictUserId: boundProfile.UserID,
+        });
+      }
+    }
+
     // Update the user profile with the new subscription.
-    // Adjust the SQL to match your actual database columns and driver.
     await db.query(
       `UPDATE Profile
        SET SubscriptionLevelID = @tier,
            SubscriptionStartDate = GETDATE(),
            SubscriptionEndDate = @endDate,
            IsSubscriptionActive = 1,
+           SubscriptionStatus = @subscriptionStatus,
+           IAPSubscriptionID = COALESCE(@subscriptionId, IAPSubscriptionID),
+           IAPCustomerID = COALESCE(@appAccountToken, IAPCustomerID),
            UpdatedAt = GETDATE()
        WHERE UserID = @userId`,
       [
         { name: 'tier', value: validatedTier },
         { name: 'endDate', value: endDate },
+        { name: 'subscriptionStatus', value: isTrial ? 'trialing' : 'active' },
+        { name: 'subscriptionId', value: resolvedSubscriptionId },
+        { name: 'appAccountToken', value: appAccountToken },
         { name: 'userId', value: userId },
       ]
     );
@@ -211,10 +261,10 @@ router.post('/api/iap/validate-purchase', async (req, res) => {
     res.json({
       success: true,
       subscription: {
-        id: validation.transactionId || transactionId,
+        id: resolvedSubscriptionId,
         status: isTrial ? 'trialing' : 'active',
       },
-      subscriptionId: validation.transactionId || transactionId,
+      subscriptionId: resolvedSubscriptionId,
       status: isTrial ? 'trialing' : 'active',
     });
   } catch (error) {
