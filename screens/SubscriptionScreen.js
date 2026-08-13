@@ -222,7 +222,14 @@ const planConfig = {
 
 export default function SubscriptionScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { currentTier, cancelSubscription, reactivateSubscription, reloadSubscriptionData, userProfile } = useSubscription();
+  const {
+    currentTier,
+    cancelSubscription,
+    reactivateSubscription,
+    reloadSubscriptionData,
+    userProfile,
+    subscriptionStatus: lifecycleSubscriptionStatus,
+  } = useSubscription();
   const [selectedTier, setSelectedTier] = useState(null);
   const [billingInterval, setBillingInterval] = useState(planConfig.defaultInterval);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -235,9 +242,18 @@ export default function SubscriptionScreen({ navigation }) {
     userProfile?.isSubscriptionActive ??
     false
   );
-  const isSubscriptionExpired = Boolean(
-    subscriptionEndDate && !Number.isNaN(subscriptionEndDate.getTime()) && subscriptionEndDate <= new Date()
-  );
+  const subscriptionStatus = String(
+    lifecycleSubscriptionStatus ||
+    userProfile?.SubscriptionStatus ||
+    userProfile?.subscriptionStatus ||
+    ''
+  ).toLowerCase();
+  const isCancelPending = subscriptionStatus === 'cancel_pending';
+  const isBuyerEntitled = ['trialing', 'active', 'past_due', 'cancel_pending'].includes(subscriptionStatus);
+  const canCancelSubscription = userProfile?.canCancelSubscription != null
+    ? Boolean(userProfile.canCancelSubscription) && !isCancelPending
+    : Boolean(isBuyerEntitled && !isCancelPending);
+  const backendSubscriptionActionLabel = userProfile?.subscriptionActionLabel || userProfile?.SubscriptionActionLabel || null;
   const isSubscriptionCancelled = Boolean(
     userProfile?.IsCancelled ??
     userProfile?.isCancelled ??
@@ -245,8 +261,17 @@ export default function SubscriptionScreen({ navigation }) {
     userProfile?.cancelledAt ??
     false
   );
+  const isSubscriptionExpired = Boolean(
+    subscriptionEndDate && !Number.isNaN(subscriptionEndDate.getTime()) && subscriptionEndDate <= new Date()
+  );
   const isAnySubscriptionActionProcessing = isCancelling || isReactivating;
   const activePaidPlanName = planConfig.plans.find((plan) => String(plan.key || '').toLowerCase() === normalizedCurrentTier)?.name || 'Buyer';
+  const activeSubscriptionBillingInterval = String(
+    userProfile?.BillingInterval ||
+    userProfile?.billingInterval ||
+    billingInterval ||
+    planConfig.defaultInterval
+  ).toLowerCase();
 
   const formatSubscriptionEndDate = (value) => {
     if (!value) return null;
@@ -265,8 +290,15 @@ export default function SubscriptionScreen({ navigation }) {
     const planKey = String(plan.key || '').toLowerCase();
     const isCurrentPlan = planKey === normalizedCurrentTier;
     const price = plan.prices?.[billingInterval];
-    const canRenewCurrentPlan = isCurrentPlan && planKey !== 'free' && (isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive);
-    const canCancelCurrentPlan = isCurrentPlan && planKey !== 'free' && isSubscriptionActive && !isSubscriptionExpired && !isSubscriptionCancelled;
+    const renewPrice = plan.prices?.[activeSubscriptionBillingInterval] || price;
+    const shouldRenewCurrentPlan = isCurrentPlan && planKey !== 'free' && (
+      isCancelPending ||
+      isSubscriptionCancelled ||
+      isSubscriptionExpired ||
+      !isSubscriptionActive ||
+      !isBuyerEntitled
+    );
+    const canCancelCurrentPlan = isCurrentPlan && planKey !== 'free' && canCancelSubscription;
 
     if (!plan.isAvailable) {
       return { type: 'coming_soon', label: 'Coming soon' };
@@ -277,12 +309,12 @@ export default function SubscriptionScreen({ navigation }) {
         return { type: 'current_plan', label: 'Current plan' };
       }
 
-      if (canRenewCurrentPlan) {
-        return { type: 'renew', label: `Renew: ${price.display}` };
+      if (shouldRenewCurrentPlan) {
+        return { type: 'renew', label: `Renew: ${renewPrice.display}` };
       }
 
       if (canCancelCurrentPlan) {
-        return { type: 'cancel', label: 'Cancel subscription' };
+        return { type: 'cancel', label: backendSubscriptionActionLabel || 'Cancel Subscription' };
       }
 
       return { type: 'current_plan', label: 'Current plan' };
@@ -290,7 +322,7 @@ export default function SubscriptionScreen({ navigation }) {
 
     if (planKey === 'free') {
       return normalizedCurrentTier === 'free'
-        ? { type: 'current_plan', label: 'Current plan' }
+        ? { type: 'current_plan', label: 'Current Plan' }
         : { type: 'cancel_to_free', label: 'Subscribe to Free' };
     }
 
@@ -323,8 +355,8 @@ export default function SubscriptionScreen({ navigation }) {
         return;
       }
 
-      if (isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive) {
-        handleReactivateSubscription(tier);
+      if (isCancelPending || isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive || !isBuyerEntitled) {
+        navigation.navigate('Payment', { tier, billingInterval: activeSubscriptionBillingInterval });
         return;
       }
 

@@ -86,6 +86,71 @@ const isProfileInTrial = (userProfile) => {
   return false;
 };
 
+const normalizeSubscriptionLifecycleStatus = (subscriptionState = {}) => {
+  const rawStatus = String(
+    subscriptionState?.SubscriptionStatus ||
+    subscriptionState?.subscriptionStatus ||
+    subscriptionState?.status ||
+    ''
+  ).toLowerCase();
+
+  const trialStartDate =
+    subscriptionState?.TrialStartDate ||
+    subscriptionState?.trialStartDate ||
+    null;
+  const trialEndDate =
+    subscriptionState?.TrialEndDate ||
+    subscriptionState?.trialEndDate ||
+    null;
+
+  const hasTrialWindow = Boolean(trialStartDate && trialEndDate);
+
+  if (rawStatus === 'cancel_pending' && !hasTrialWindow) {
+    return 'free';
+  }
+
+  if (rawStatus === 'cancel_pending') {
+    return 'cancel_pending';
+  }
+
+  if (['cancelled', 'canceled', 'expired', 'free'].includes(rawStatus)) {
+    return 'free';
+  }
+
+  if (rawStatus === 'trialing' || isProfileInTrial(subscriptionState)) {
+    return 'trialing';
+  }
+
+  if (['active', 'past_due'].includes(rawStatus)) {
+    return rawStatus;
+  }
+
+  const endDateValue =
+    subscriptionState?.SubscriptionEndDate ||
+    subscriptionState?.subscriptionEndDate ||
+    subscriptionState?.endDate ||
+    null;
+
+  if (endDateValue) {
+    const endDate = new Date(endDateValue);
+    if (!Number.isNaN(endDate.getTime()) && endDate <= new Date()) {
+      return 'free';
+    }
+  }
+
+  const isSubscriptionActive = subscriptionState?.IsSubscriptionActive ?? subscriptionState?.isSubscriptionActive;
+  if (isSubscriptionActive === false) {
+    return 'free';
+  }
+
+  if (rawStatus) {
+    return rawStatus;
+  }
+
+  const tier = String(subscriptionState?.tier || subscriptionState?.subscriptionLevelId || '').toLowerCase();
+  return tier && tier !== 'free' ? 'active' : 'free';
+};
+
 // Check subscription validity and handle expiration
 const checkSubscriptionValidity = async (subscriptionState) => {
   const { tier, endDate, autoRenew } = subscriptionState;
@@ -330,6 +395,7 @@ const SUBSCRIPTION_ACTIONS = {
 // Initial state
 const initialState = {
   currentTier: 'free',
+  subscriptionStatus: 'free',
   startDate: null,
   endDate: null,
   isCancelled: false,
@@ -349,12 +415,18 @@ function subscriptionReducer(state, action) {
     case SUBSCRIPTION_ACTIONS.SET_SUBSCRIPTION:
       // Subscription state is server-authoritative. Do not persist tier/trial
       // values locally because Stripe/backend changes must win.
+      const resolvedSubscriptionStatus = normalizeSubscriptionLifecycleStatus(action.payload);
+      const resolvedCurrentTier = resolvedSubscriptionStatus === 'free'
+        ? 'free'
+        : String(action.payload.tier || action.payload.subscriptionLevelId || state.currentTier || 'free').toLowerCase();
+
       return {
         ...state,
-        currentTier: action.payload.tier,
+        currentTier: resolvedCurrentTier,
+        subscriptionStatus: resolvedSubscriptionStatus,
         subscriptionStartDate: action.payload.startDate,
         subscriptionEndDate: action.payload.endDate,
-        isCancelled: action.payload.isCancelled,
+        isCancelled: resolvedSubscriptionStatus === 'free' ? false : Boolean(action.payload.isCancelled),
         trialStartDate: action.payload.trialStartDate,
         trialEndDate: action.payload.trialEndDate,
         isInTrial: action.payload.isInTrial,
@@ -373,6 +445,7 @@ function subscriptionReducer(state, action) {
       
       return {
         ...state,
+        subscriptionStatus: action.payload.isInTrial ? 'trialing' : 'free',
         trialStartDate: action.payload.trialStartDate,
         trialEndDate: action.payload.trialEndDate,
         isInTrial: action.payload.isInTrial,
