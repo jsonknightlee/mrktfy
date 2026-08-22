@@ -137,6 +137,74 @@ const withSearchDistance = (listing, filterJson) => {
 
 const withDeckSearchDistance = (listing, deck) => withSearchDistance(listing, deck?.filterJson || deck?.FilterJson);
 
+const parseBooleanLike = (value) => (
+  value === true ||
+  value === 1 ||
+  String(value).trim().toLowerCase() === 'true' ||
+  String(value).trim().toLowerCase() === '1' ||
+  String(value).trim().toLowerCase() === 'yes' ||
+  String(value).trim().toLowerCase() === 'on'
+);
+
+const getListingStatusText = (listing = {}) => String(
+  listing.Status ??
+  listing.status ??
+  listing.ListingStatus ??
+  listing.listingStatus ??
+  listing.PropertyStatus ??
+  listing.propertyStatus ??
+  ''
+).trim().toLowerCase();
+
+const isSoldListing = (listing = {}) => {
+  const status = getListingStatusText(listing);
+  return (
+    status === 'sold' ||
+    status.includes('sold stc') ||
+    status.includes('sstc') ||
+    status.startsWith('sold ') ||
+    status.includes('sold subject to contract')
+  );
+};
+
+const shouldIncludeSoldListings = (filterSource = {}) => {
+  const directFlags = [
+    filterSource.includeSoldProperties,
+    filterSource.includeSold,
+    filterSource.includeSoldListings,
+    filterSource.includeSoldPropertiesOnly,
+  ];
+
+  if (directFlags.some(parseBooleanLike)) {
+    return true;
+  }
+
+  const statusValues = [
+    filterSource.status,
+    filterSource.Status,
+    filterSource.listingStatus,
+    filterSource.ListingStatus,
+    filterSource.propertyStatus,
+    filterSource.PropertyStatus,
+    filterSource.statuses,
+    filterSource.Statuses,
+  ];
+
+  return statusValues.flatMap((value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') return value.split(',');
+    return [];
+  }).some((value) => String(value).trim().toLowerCase().includes('sold'));
+};
+
+const filterSoldListings = (listings = [], filterSource = {}) => {
+  if (shouldIncludeSoldListings(filterSource)) {
+    return listings;
+  }
+
+  return (Array.isArray(listings) ? listings : []).filter((listing) => !isSoldListing(listing));
+};
+
 const readJsonArray = async (key) => {
   try {
     const value = await AsyncStorage.getItem(key);
@@ -733,6 +801,8 @@ const getLocalMatchedDeckListings = async (deckId, userProfile) => {
 
   if (!deck) return [];
 
+  const includeSoldListings = shouldIncludeSoldListings(deck?.filterJson || deck?.FilterJson || {});
+
   const excludedIds = new Set([
     ...deck.shortlist.map(getListingId).filter(Boolean),
     ...deck.dismissedListingIds.map(String),
@@ -754,6 +824,10 @@ const getLocalMatchedDeckListings = async (deckId, userProfile) => {
       }
 
       seenIds.add(listingId);
+      if (!includeSoldListings && isSoldListing(listing)) {
+        return;
+      }
+
       listings.push(normalizeListing(listing));
     });
 
@@ -774,6 +848,10 @@ const getLocalMatchedDeckListings = async (deckId, userProfile) => {
       }
 
       seenIds.add(listingId);
+      if (!includeSoldListings && isSoldListing(listing)) {
+        return;
+      }
+
       listings.push(normalizeListing(listing, notification));
     });
   });
@@ -820,6 +898,8 @@ export const getMatchedDeckListings = async (deckId, userProfile, deckOverride =
         responseListings = unfilteredListings;
       }
     }
+
+    responseListings = filterSoldListings(responseListings, deck?.filterJson || deck?.FilterJson || {});
 
     console.log('[PROPERTY-DECK] loaded deck listings response:', {
       deckId,
@@ -1069,6 +1149,7 @@ export const getShortlist = async (deckId, userProfile, deckOverride = null) => 
     ]);
 
     return getItems(response.data, 'shortlist')
+      .filter((item) => shouldIncludeSoldListings(deck?.filterJson || deck?.FilterJson || {}) || !isSoldListing(item))
       .map((item) => normalizeListing(item))
       .map((item) => withDeckSearchDistance(item, deck));
   },

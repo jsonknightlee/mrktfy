@@ -1,7 +1,7 @@
 // screens/auth/RegisterScreen.js
 import React, { useState } from 'react';
 import { View, TextInput, Alert, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { registerUser } from '../../services/authApi';
+import { registerUser, fetchUserProfile } from '../../services/authApi';
 import { saveToken } from '../../utils/tokenStorage';
 import { AuthContext } from '../../contexts/AuthContext';
 
@@ -13,7 +13,7 @@ export default function RegisterScreen({ navigation }) {
     Lastname: '',
   });
   const [submitting, setSubmitting] = useState(false);
-  const { signIn, setIsLoggedIn } = React.useContext(AuthContext);
+  const { signIn, setIsLoggedIn, setUserProfile } = React.useContext(AuthContext);
   
 
   const handleChange = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
@@ -42,7 +42,21 @@ export default function RegisterScreen({ navigation }) {
 
     setSubmitting(true);
     try {
-      await registerUser(form);
+      const response = await registerUser(form);
+      const token = response?.token ?? response?.data?.token ?? null;
+
+      if (token) {
+        const user = await fetchUserProfile(token);
+        if (typeof signIn === 'function') {
+          await signIn(token, user);
+        } else {
+          await saveToken(token);
+          setUserProfile?.(user);
+          setIsLoggedIn?.(true);
+        }
+        return;
+      }
+
       Alert.alert('Success', 'Account created. Please log in.');
       navigation.navigate('Login');
     } catch (err) {

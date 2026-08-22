@@ -7,6 +7,66 @@ const appendParam = (params, key, value) => {
   params.append(key, value);
 };
 
+const parseBooleanLike = (value) => (
+  value === true ||
+  value === 1 ||
+  String(value).trim().toLowerCase() === 'true' ||
+  String(value).trim().toLowerCase() === '1' ||
+  String(value).trim().toLowerCase() === 'yes' ||
+  String(value).trim().toLowerCase() === 'on'
+);
+
+const getListingStatusText = (listing = {}) => String(
+  listing.Status ??
+  listing.status ??
+  listing.ListingStatus ??
+  listing.listingStatus ??
+  listing.PropertyStatus ??
+  listing.propertyStatus ??
+  ''
+).trim().toLowerCase();
+
+const isSoldListing = (listing = {}) => {
+  const status = getListingStatusText(listing);
+  return (
+    status === 'sold' ||
+    status.includes('sold stc') ||
+    status.includes('sstc') ||
+    status.startsWith('sold ') ||
+    status.includes('sold subject to contract')
+  );
+};
+
+const shouldIncludeSoldProperties = (filters = {}) => {
+  const directFlags = [
+    filters.includeSoldProperties,
+    filters.includeSold,
+    filters.includeSoldListings,
+    filters.includeSoldPropertiesOnly,
+  ];
+
+  if (directFlags.some(parseBooleanLike)) {
+    return true;
+  }
+
+  const statusValues = [
+    filters.status,
+    filters.Status,
+    filters.listingStatus,
+    filters.ListingStatus,
+    filters.propertyStatus,
+    filters.PropertyStatus,
+    filters.statuses,
+    filters.Statuses,
+  ];
+
+  return statusValues.flatMap((value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') return value.split(',');
+    return [];
+  }).some((value) => String(value).trim().toLowerCase().includes('sold'));
+};
+
 const fetchWithTimeout = async (url, options = {}, timeoutMs = NEARBY_FETCH_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -26,6 +86,7 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
   // Convert 'sale' to 'for-sale' for the API
   const apiType = type === 'sale' ? 'for-sale' : type;
   const params = new URLSearchParams();
+  const includeSoldProperties = shouldIncludeSoldProperties(filters);
   appendParam(params, 'lat', lat);
   appendParam(params, 'lng', lng);
   appendParam(params, 'radiusKm', radiusKm);
@@ -35,6 +96,9 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
   appendParam(params, 'maxPrice', filters.maxPrice && Number(filters.maxPrice) > 1000000 ? '' : filters.maxPrice);
   appendParam(params, 'bedrooms', filters.beds);
   appendParam(params, 'bathrooms', filters.baths);
+  if (includeSoldProperties) {
+    appendParam(params, 'includeSoldProperties', 'true');
+  }
 
   let url = `${API_BASE_URL}/realestate/nearby?${params.toString()}`;
   console.log('Calling:', url);
@@ -141,6 +205,10 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
 
       return { ...listing, ImageUrls: imageUrls, ...preservedFields };
     });
+
+    if (!includeSoldProperties) {
+      data = data.filter((listing) => !isSoldListing(listing));
+    }
 
     //console.log('Listings: ' + JSON.stringify(data))
 

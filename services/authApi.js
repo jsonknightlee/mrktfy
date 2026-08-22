@@ -15,6 +15,21 @@ export const registerUser = async (payload) => {
   return data;
 };
 
+export const deleteAccount = async () => {
+  const { data } = await authApi.delete('/delete-account');
+  return data;
+};
+
+export const acknowledgePrivacyNotice = async (payload) => {
+  const { data } = await authApi.post('/privacy-notice/acknowledge', payload);
+  return data;
+};
+
+export const requestPasswordReset = async (email) => {
+  const { data } = await authApi.post('/forgot-password', { email });
+  return data;
+};
+
 export const loginUser = async (payload) => {
   const { data } = await authApi.post('/login', payload);
   return data; // expect token, etc.

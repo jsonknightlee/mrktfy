@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.38:3001",
+        "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3001",
+        "EXPO_PUBLIC_API_BACKUP_BASE_URL": "http://192.168.1.38:3001",
         "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
         "EXPO_PUBLIC_APP_ENV": "development",
         "EXPO_PUBLIC_DEBUG_MODE": "true",
@@ -31,7 +32,8 @@
     "preview": {
       "distribution": "store",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.38:3001",
+        "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3001",
+        "EXPO_PUBLIC_API_BACKUP_BASE_URL": "http://192.168.1.38:3001",
         "EXPO_PUBLIC_API_KEY": "804276f41491b35e448d41fdb321d66f460a272fed36da3840463c480c505f2e",
         "EXPO_PUBLIC_APP_ENV": "development",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAKFj0CZ25nbVm5Y_HHsfJPGcXREH8LLN4"

@@ -1,5 +1,5 @@
 // navigation/AppNavigator.js
-import React, { useContext } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -13,6 +13,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import PropertyDeckScreen from '../screens/PropertyDeckScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
+import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import ListingDetailScreen from '../screens/ListingDetailScreen';
 import DecisionBoardScreen from '../screens/DecisionBoardScreen';
 import DecisionBoardListingScreen from '../screens/DecisionBoardListingScreen';
@@ -23,8 +24,38 @@ import PaymentScreen from '../screens/PaymentScreen';
 import BuyerPreferencesScreen from '../screens/BuyerPreferencesScreen';
 import BuyerWorkspaceScreen from '../screens/BuyerWorkspaceScreen';
 import ContactAgentScreen from '../screens/ContactAgentScreen';
+import PrivacyNoticeModal from '../components/PrivacyNoticeModal';
+import { acknowledgePrivacyNotice } from '../services/authApi';
 
 import { AuthContext } from '../contexts/AuthContext';
+
+const PRIVACY_POLICY_URL = 'https://mrktfy.com/privacy-policy';
+const TERMS_AND_CONDITIONS_URL = 'https://mrktfy.com/terms-and-conditions';
+
+const getPrivacyNoticeRequirement = (profile = null) => {
+  if (!profile) return false;
+
+  const hasPrivacyCurrentVersion = profile.currentPrivacyNoticeVersion != null;
+  const hasTermsCurrentVersion = profile.currentTermsVersion != null;
+  const hasPrivacyAccepted = profile.privacyNoticeAcceptedDate != null;
+  const hasTermsAccepted = profile.termsAcceptedDate != null;
+
+  const privacyVersionMismatch = hasPrivacyCurrentVersion
+    && profile.privacyNoticeVersion != null
+    && profile.privacyNoticeVersion !== profile.currentPrivacyNoticeVersion;
+
+  const termsVersionMismatch = hasTermsCurrentVersion
+    && profile.termsVersion != null
+    && profile.termsVersion !== profile.currentTermsVersion;
+
+  return (
+    (!hasPrivacyAccepted || !hasTermsAccepted) && profile.requiresPrivacyNotice === true ||
+    !hasPrivacyAccepted ||
+    privacyVersionMismatch ||
+    !hasTermsAccepted ||
+    termsVersionMismatch
+  );
+};
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -77,7 +108,59 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { isLoggedIn } = useContext(AuthContext);
+  const { isLoggedIn, userProfile, setUserProfile, refreshUserProfile, persistPrivacyNoticeAcknowledgement } = useContext(AuthContext);
+  const [privacyNoticeSubmitting, setPrivacyNoticeSubmitting] = useState(false);
+
+  const requiresPrivacyNotice = useMemo(
+    () => getPrivacyNoticeRequirement(userProfile),
+    [userProfile]
+  );
+
+  const privacyNoticePayload = useMemo(() => ({
+    privacyNoticeVersion: userProfile?.currentPrivacyNoticeVersion ?? userProfile?.privacyNoticeVersion ?? '1.0',
+    termsVersion: userProfile?.currentTermsVersion ?? userProfile?.termsVersion ?? '1.0',
+  }), [userProfile]);
+
+  const handlePrivacyNoticeContinue = async () => {
+    if (privacyNoticeSubmitting) return;
+
+    setPrivacyNoticeSubmitting(true);
+    try {
+      const response = await acknowledgePrivacyNotice(privacyNoticePayload);
+      const acknowledgedAt = response?.acknowledgedAt || new Date().toISOString();
+
+      const currentProfile = userProfile || {};
+      const persistedProfile = typeof persistPrivacyNoticeAcknowledgement === 'function'
+        ? await persistPrivacyNoticeAcknowledgement(currentProfile, {
+            acknowledgedAt,
+            privacyNoticeVersion: response?.privacyNoticeVersion ?? privacyNoticePayload.privacyNoticeVersion,
+            termsVersion: response?.termsVersion ?? privacyNoticePayload.termsVersion,
+          })
+        : null;
+
+      setUserProfile((prev) => ({
+        ...(prev || {}),
+        ...(persistedProfile || {}),
+        requiresPrivacyNotice: false,
+        privacyNoticeAcceptedDate: acknowledgedAt,
+        privacyNoticeVersion: response?.privacyNoticeVersion ?? privacyNoticePayload.privacyNoticeVersion,
+        termsAcceptedDate: acknowledgedAt,
+        termsVersion: response?.termsVersion ?? privacyNoticePayload.termsVersion,
+        privacyNoticeAcknowledgedAt: acknowledgedAt,
+      }));
+
+      if (typeof refreshUserProfile === 'function') {
+        await refreshUserProfile().catch((error) => {
+          console.error('Failed to refresh profile after privacy acknowledgement:', error);
+        });
+      }
+    } catch (error) {
+      console.error('Privacy notice acknowledgement failed:', error);
+      throw error;
+    } finally {
+      setPrivacyNoticeSubmitting(false);
+    }
+  };
 
   if (isLoggedIn === null) {
     return (
@@ -88,103 +171,121 @@ export default function AppNavigator() {
   }
 
   return (
-    // 🔑 This key forces a full remount when auth flips
-    <NavigationContainer key={isLoggedIn ? 'app' : 'auth'}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isLoggedIn ? (
-          <>
-            <Stack.Screen name="Tabs" component={MainTabs} />
-            <Stack.Screen
-              name="ListingDetail"
-              component={ListingDetailScreen}
-              options={{
-                presentation: 'modal',
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_bottom', // ✅ optional but nice
-              }}
-            />
-            <Stack.Screen
-              name="NotificationListings"
-              component={NotificationListingsScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="DecisionBoard"
-              component={DecisionBoardScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="DecisionBoardListing"
-              component={DecisionBoardListingScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="DecisionBoards"
-              component={DecisionBoardListScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="Subscription"
-              component={SubscriptionScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="Payment"
-              component={PaymentScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="BuyerPreferences"
-              component={BuyerPreferencesScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="ContactAgent"
-              component={ContactAgentScreen}
-              options={{
-                headerShown: false,
-                gestureEnabled: true,
-                animation: 'slide_from_right',
-              }}
-            />
-          </>
-        ) : (
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Register" component={RegisterScreen} />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer key={isLoggedIn ? 'app' : 'auth'}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {isLoggedIn ? (
+            <>
+              <Stack.Screen name="Tabs" component={MainTabs} />
+              <Stack.Screen
+                name="ListingDetail"
+                component={ListingDetailScreen}
+                options={{
+                  presentation: 'modal',
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_bottom', // ✅ optional but nice
+                }}
+              />
+              <Stack.Screen
+                name="NotificationListings"
+                component={NotificationListingsScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="DecisionBoard"
+                component={DecisionBoardScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="DecisionBoardListing"
+                component={DecisionBoardListingScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="DecisionBoards"
+                component={DecisionBoardListScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="Subscription"
+                component={SubscriptionScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="Payment"
+                component={PaymentScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="BuyerPreferences"
+                component={BuyerPreferencesScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+              <Stack.Screen
+                name="ContactAgent"
+                component={ContactAgentScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Register" component={RegisterScreen} />
+              <Stack.Screen
+                name="ForgotPassword"
+                component={ForgotPasswordScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                  animation: 'slide_from_right',
+                }}
+              />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+
+      <PrivacyNoticeModal
+        visible={Boolean(isLoggedIn && requiresPrivacyNotice)}
+        loading={privacyNoticeSubmitting}
+        onContinue={handlePrivacyNoticeContinue}
+        privacyUrl={PRIVACY_POLICY_URL}
+        termsUrl={TERMS_AND_CONDITIONS_URL}
+      />
+    </>
   );
 }
 

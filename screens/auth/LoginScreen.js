@@ -35,7 +35,7 @@ export default function LoginScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
   const [oauthLoading, setOauthLoading] = useState('');
   const [testLoginSubmitting, setTestLoginSubmitting] = useState(false);
-  const { signIn, setIsLoggedIn } = useContext(AuthContext);
+  const { signIn, setIsLoggedIn, setUserProfile } = useContext(AuthContext);
   const testLoginEnabled = __DEV__ && isTestLoginEnabled();
   const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
   const baseGoogleClientId = extra.GOOGLE_CLIENT_ID
@@ -105,8 +105,9 @@ export default function LoginScreen({ navigation }) {
         Alert.alert('Welcome', `Hello ${user.Firstname || user.Name || 'there'}!`);
 
         if (typeof signIn === 'function') {
-          await signIn(token);
+          await signIn(token, user);
         } else {
+          setUserProfile?.(user);
           setIsLoggedIn?.(true);
         }
       } catch (err) {
@@ -154,8 +155,9 @@ export default function LoginScreen({ navigation }) {
 
       // Update authentication state
       if (typeof signIn === 'function') {
-        await signIn(token);
+        await signIn(token, user);
       } else {
+        setUserProfile?.(user);
         setIsLoggedIn?.(true);
       }
     } catch (err) {
@@ -182,8 +184,9 @@ export default function LoginScreen({ navigation }) {
       console.log('🧪 [TEST-LOGIN] Signed in as test user:', user?.UserID || user?.Username);
 
       if (typeof signIn === 'function') {
-        await signIn(token);
+        await signIn(token, user);
       } else {
+        setUserProfile?.(user);
         setIsLoggedIn?.(true);
       }
     } catch (err) {
@@ -254,8 +257,9 @@ export default function LoginScreen({ navigation }) {
 
         // Update authentication state
         if (typeof signIn === 'function') {
-          await signIn(token);
+          await signIn(token, user);
         } else {
+          setUserProfile?.(user);
           setIsLoggedIn?.(true);
         }
       } else {
@@ -302,6 +306,13 @@ export default function LoginScreen({ navigation }) {
             editable={!submitting}
           />
         </View>
+
+        <TouchableOpacity
+          style={styles.forgotPasswordLink}
+          onPress={() => navigation.navigate('ForgotPassword')}
+        >
+          <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.signInButton, submitting && styles.disabledButton]}
@@ -428,6 +439,15 @@ const styles = StyleSheet.create({
     height: 48,
     fontSize: 16,
     color: '#333',
+  },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginBottom: 16,
+  },
+  forgotPasswordText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   signInButton: {
     backgroundColor: '#007AFF',

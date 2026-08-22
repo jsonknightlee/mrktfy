@@ -1,10 +1,10 @@
 // screens/ProfileScreen.js
 import React, { useContext, useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, FlatList, Image, ScrollView, TextInput, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, FlatList, Image, ScrollView, TextInput, Switch, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { getToken, deleteToken } from '../utils/tokenStorage';
-import { fetchUserProfile } from '../services/authApi';
+import { fetchUserProfile, deleteAccount } from '../services/authApi';
 import { AuthContext } from '../contexts/AuthContext';
 import { getFavorites, getHistory } from '../services/activityApi';
 import { useFavorites } from '../contexts/FavoritesContext';
@@ -60,6 +60,7 @@ export default function ProfileScreen({ navigation }) {
   const [userInfo, setUserInfo] = useState(null); // Store token info
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const [tab, setTab] = useState('profile'); // 'profile' | 'preferences' | 'activity' | 'settings' | 'notifications'
   const [loadingActivity, setLoadingActivity] = useState(false);
@@ -158,6 +159,26 @@ export default function ProfileScreen({ navigation }) {
     }
   }, []);
 
+  const clearLocalSessionState = useCallback(async () => {
+    try {
+      await deleteToken();
+    } catch (error) {
+      console.error('Session clear: failed to delete auth token:', error);
+    }
+
+    try {
+      const result = await clearAllAsyncStorage();
+      console.log('🧹 Session clear: AsyncStorage cleared, result:', result);
+    } catch (storageError) {
+      console.error('Session clear: failed to clear AsyncStorage:', storageError);
+    }
+
+    setUser(null);
+    setUserInfo(null);
+    setIsLoggedInState(false);
+    setIsLoggedIn(false);
+  }, [clearAllAsyncStorage, setIsLoggedIn]);
+
   // Load when switching to Activity tab
   useEffect(() => {
     if (tab === 'activity') loadActivity();
@@ -172,24 +193,57 @@ export default function ProfileScreen({ navigation }) {
     if (loggingOut) return;
     setLoggingOut(true);
     try {
-      await deleteToken();
-      
-      // Nuclear option - clear ALL AsyncStorage
-      try {
-        const result = await clearAllAsyncStorage();
-        console.log('🧹 Logout: All AsyncStorage cleared, result:', result);
-      } catch (subscriptionError) {
-        console.error('Logout: Failed to clear AsyncStorage:', subscriptionError);
-      }
-      
-      setIsLoggedInState(false);
-      setIsLoggedIn(false); // Also update context
+      await clearLocalSessionState();
       console.log('🔒 Logout completed');
     } catch (error) {
       console.error('Logout error:', error);
       Alert.alert('Logout failed', 'Please try again.');
     } finally {
       setLoggingOut(false);
+    }
+  };
+
+  const onDeleteAccountPress = () => {
+    if (loggingOut || deletingAccount) return;
+    Alert.alert(
+      'Delete your Mrktfy account?',
+      'This will permanently delete your Mrktfy account and all data associated with it. This action cannot be undone.\n\nDeleting your Mrktfy account does not cancel an active App Store subscription. If you have a Buyer or Investor subscription, you must manage or cancel it separately in your device\'s Apple subscription settings before deleting your account.\n\nAre you sure you want to continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Manage Subscription',
+          onPress: async () => {
+            try {
+              await Linking.openURL('https://apps.apple.com/account/subscriptions');
+            } catch (error) {
+              console.error('Failed to open Apple subscription management:', error);
+              Alert.alert('Could not open subscriptions', 'Please manage your subscription in the App Store subscription settings.');
+            }
+          },
+        },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: onConfirmDeleteAccount,
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const onConfirmDeleteAccount = async () => {
+    if (deletingAccount) return;
+
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      await clearLocalSessionState();
+      Alert.alert('Account deleted', 'Your Mrktfy account and associated data have been permanently deleted.');
+    } catch (error) {
+      console.error('Delete account error:', error);
+      Alert.alert('Delete failed', error?.response?.data?.error || error?.response?.data?.message || 'Could not delete your account. Please try again.');
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -480,6 +534,15 @@ export default function ProfileScreen({ navigation }) {
           >
             <Text style={styles.logoutText}>{loggingOut ? 'Logging out…' : 'Logout'}</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.deleteButton, (loggingOut || deletingAccount) && { opacity: 0.6 }]}
+            onPress={onDeleteAccountPress}
+            disabled={loggingOut || deletingAccount}
+          >
+            <Ionicons name="trash-outline" size={18} color="#B91C1C" style={styles.deleteButtonIcon} />
+            <Text style={styles.deleteButtonText}>{deletingAccount ? 'Deleting…' : 'Delete Account'}</Text>
+          </TouchableOpacity>
         </ScrollView>
       ) : tab === 'preferences' ? (
         <ScrollView style={styles.settingsPane}>
@@ -567,6 +630,7 @@ export default function ProfileScreen({ navigation }) {
           )}
         </View>
       )}
+
     </View>
   );
 }
@@ -715,6 +779,26 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16
+  },
+  deleteButton: {
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  deleteButtonIcon: {
+    marginRight: 8,
+  },
+  deleteButtonText: {
+    color: '#B91C1C',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   settingCard: {
     flexDirection: 'row',

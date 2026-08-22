@@ -20,6 +20,34 @@ export default function VirtualTourModal({ visible, onClose, url, title }) {
   const handleLoadStart = () => setLoading(true);
   const handleLoadEnd = () => setLoading(false);
 
+  const handleMessage = (event) => {
+    const message = String(event?.nativeEvent?.data || '').trim();
+
+    if (message === 'close-modal') {
+      onClose?.();
+    }
+  };
+
+  const handleShouldStartLoadWithRequest = (request) => {
+    const requestUrl = String(request?.url || '');
+    const lowerUrl = requestUrl.toLowerCase();
+
+    if (
+      lowerUrl.startsWith('mailto:') ||
+      lowerUrl.startsWith('tel:') ||
+      lowerUrl.startsWith('sms:') ||
+      lowerUrl.includes('email-agent') ||
+      lowerUrl.includes('contact-agent') ||
+      lowerUrl.includes('enquire') ||
+      lowerUrl.includes('close')
+    ) {
+      onClose?.();
+      return false;
+    }
+
+    return true;
+  };
+
   const injectedJavaScript = `
     // Hide unnecessary UI elements for better viewing experience
     (function() {
@@ -35,6 +63,44 @@ export default function VirtualTourModal({ visible, onClose, url, title }) {
       if (virtualTourElement) {
         virtualTourElement.scrollIntoView();
       }
+
+      const shouldCloseFromElement = (element) => {
+        if (!element) return false;
+
+        const href = String(element.getAttribute?.('href') || element.href || '').toLowerCase();
+        const text = String(element.textContent || element.innerText || '').toLowerCase().trim();
+        const ariaLabel = String(element.getAttribute?.('aria-label') || '').toLowerCase();
+        const title = String(element.getAttribute?.('title') || '').toLowerCase();
+
+        return (
+          href.startsWith('mailto:') ||
+          href.startsWith('tel:') ||
+          href.startsWith('sms:') ||
+          href.includes('email-agent') ||
+          href.includes('contact-agent') ||
+          href.includes('enquire') ||
+          text === 'close' ||
+          text === 'x' ||
+          text.includes('email agent') ||
+          text.includes('contact agent') ||
+          text.includes('enquire') ||
+          ariaLabel.includes('close') ||
+          ariaLabel.includes('email agent') ||
+          ariaLabel.includes('contact agent') ||
+          title.includes('close') ||
+          title.includes('email agent') ||
+          title.includes('contact agent')
+        );
+      };
+
+      document.addEventListener('click', function(event) {
+        const target = event.target?.closest?.('a, button, [role="button"]') || event.target;
+        if (shouldCloseFromElement(target)) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.ReactNativeWebView?.postMessage('close-modal');
+        }
+      }, true);
     })();
     true;
   `;
@@ -71,6 +137,8 @@ export default function VirtualTourModal({ visible, onClose, url, title }) {
             style={styles.webView}
             onLoadStart={handleLoadStart}
             onLoadEnd={handleLoadEnd}
+            onMessage={handleMessage}
+            onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             startInLoadingState={true}

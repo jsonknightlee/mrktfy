@@ -95,7 +95,7 @@ export default function MapScreen() {
   const [mapVisible, setMapVisible] = useState(false);
   const [mapType, setMapType] = useState('real-estate');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
-  const [filters, setFilters] = useState({ minPrice: '0', maxPrice: '400000', beds: '', baths: '' });
+  const [filters, setFilters] = useState({ minPrice: '0', maxPrice: '400000', beds: '', baths: '', includeSoldProperties: false });
   const [filtersTouched, setFiltersTouched] = useState(false);
   const [isRental, setIsRental] = useState(false);
   const [openBeds, setOpenBeds] = useState(null);
@@ -125,6 +125,7 @@ export default function MapScreen() {
   const isInteractingWithMarker = useRef(false);
   const isDismissingRef = useRef(false);
   const listingsRequestSeqRef = useRef(0);
+  const initialNearbyRetryTimerRef = useRef(null);
   const handleCreatePropertyDeckRef = useRef(null);
 
   // Toast
@@ -238,7 +239,8 @@ export default function MapScreen() {
         prev.minPrice !== next.minPrice ||
         prev.maxPrice !== next.maxPrice ||
         prev.beds !== next.beds ||
-        prev.baths !== next.baths;
+        prev.baths !== next.baths ||
+        Boolean(prev.includeSoldProperties) !== Boolean(next.includeSoldProperties);
       if (!changed) return prev;
       const updated = { ...prev, ...next };
       AsyncStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(updated));
@@ -246,7 +248,12 @@ export default function MapScreen() {
     });
   };
 
-  const loadListingsForLocation = async (location, type = isRental ? TYPE_RENT : TYPE_SALE) => {
+  const loadListingsForLocation = async (
+    location,
+    type = isRental ? TYPE_RENT : TYPE_SALE,
+    options = {}
+  ) => {
+    const { silentEmpty = false } = options;
     if (!location?.latitude || !location?.longitude) return;
 
     const requestSeq = listingsRequestSeqRef.current + 1;
@@ -263,9 +270,11 @@ export default function MapScreen() {
       if (requestSeq !== listingsRequestSeqRef.current) return;
       setListings(nearby);
 
-      if (nearby.length === 0) {
+      if (nearby.length === 0 && !silentEmpty) {
         showToast(`No listings found near ${getSearchLocationLabel(location)}.`);
       }
+
+      return nearby;
     } catch (err) {
       console.error('Failed to fetch listings:', err);
       try {
@@ -274,8 +283,10 @@ export default function MapScreen() {
         if (requestSeq !== listingsRequestSeqRef.current) return;
         setListings(londonNearby);
         console.log('Error fallback to London, found:', londonNearby.length, 'listings');
+        return londonNearby;
       } catch (fallbackErr) {
         console.error('London fallback also failed:', fallbackErr);
+        return [];
       }
     } finally {
       if (requestSeq === listingsRequestSeqRef.current) {
@@ -323,6 +334,11 @@ export default function MapScreen() {
   };
 
   const useCurrentLocationForSearch = async () => {
+    if (initialNearbyRetryTimerRef.current) {
+      clearTimeout(initialNearbyRetryTimerRef.current);
+      initialNearbyRetryTimerRef.current = null;
+    }
+
     setSearchLocation(null);
     setSearchLocationQuery('');
     setSearchLocationInputVisible(false);
@@ -335,6 +351,11 @@ export default function MapScreen() {
 
   const selectSearchLocation = async (location) => {
     if (!searchLocationEnabled || !location?.latitude || !location?.longitude) return;
+
+    if (initialNearbyRetryTimerRef.current) {
+      clearTimeout(initialNearbyRetryTimerRef.current);
+      initialNearbyRetryTimerRef.current = null;
+    }
 
     setSelectedListing(null);
     setSearchLocation(location);
@@ -438,35 +459,28 @@ export default function MapScreen() {
           const { latitude, longitude } = loc.coords;
           const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
 
-          let savedSearchLocation = null;
-          if (canUseSearchLocation(currentTier)) {
-            try {
-              const savedValue = await AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY);
-              savedSearchLocation = savedValue ? JSON.parse(savedValue) : null;
-            } catch {}
-          } else {
-            await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
-            setSearchLocation(null);
-            setSearchLocationInputVisible(false);
-          }
-
-          if (cancelled) return;
-
-          if (savedSearchLocation?.latitude && savedSearchLocation?.longitude) {
-            setSearchLocation(savedSearchLocation);
-            if (!searchLocationQuery) {
-              setSearchLocationQuery(savedSearchLocation.query || savedSearchLocation.label || '');
-            }
-          }
-
           setUserLocation(nextUserLocation);
 
-          const locationForSearch = savedSearchLocation?.latitude && canUseSearchLocation(currentTier)
-            ? savedSearchLocation
-            : nextUserLocation;
+          if (cancelled) return;
+          const nearby = await loadListingsForLocation(
+            nextUserLocation,
+            isRental ? TYPE_RENT : TYPE_SALE,
+            { silentEmpty: true }
+          );
 
           if (cancelled) return;
-          await loadListingsForLocation(locationForSearch, isRental ? TYPE_RENT : TYPE_SALE);
+
+          if (nearby?.length === 0) {
+            if (initialNearbyRetryTimerRef.current) {
+              clearTimeout(initialNearbyRetryTimerRef.current);
+            }
+
+            initialNearbyRetryTimerRef.current = setTimeout(async () => {
+              if (cancelled) return;
+              await loadListingsForLocation(nextUserLocation, isRental ? TYPE_RENT : TYPE_SALE);
+              initialNearbyRetryTimerRef.current = null;
+            }, 2000);
+          }
         } finally {
           if (!cancelled) setLocationSearchReady(true);
         }
@@ -476,6 +490,10 @@ export default function MapScreen() {
     return () => {
       cancelled = true;
       clearTimeout(debounceId);
+      if (initialNearbyRetryTimerRef.current) {
+        clearTimeout(initialNearbyRetryTimerRef.current);
+        initialNearbyRetryTimerRef.current = null;
+      }
     };
   }, [isRental, currentTier, loading]);
 
@@ -539,7 +557,7 @@ export default function MapScreen() {
 
   // Apply using optional source filters (so we can use fresh values immediately)
   const applyFilters = (sourceFilters = filters) => {
-    const { minPrice, maxPrice, beds, baths } = sourceFilters;
+    const { minPrice, maxPrice, beds, baths, includeSoldProperties } = sourceFilters;
 
     const min = parseInt(minPrice || '0', 10);
     const rawMax = parseInt(maxPrice || (isRental ? '2000' : '400000'), 10);
@@ -552,6 +570,28 @@ export default function MapScreen() {
     let filtered = listings.filter((l) => {
       const lType = ((l.ListingType ?? '').toString().trim().toLowerCase());
       if (lType && lType !== targetType) return false;
+
+      if (!includeSoldProperties) {
+        const listingStatus = String(
+          l.Status ??
+          l.status ??
+          l.ListingStatus ??
+          l.listingStatus ??
+          l.PropertyStatus ??
+          l.propertyStatus ??
+          ''
+        ).trim().toLowerCase();
+
+        if (
+          listingStatus === 'sold' ||
+          listingStatus.includes('sold stc') ||
+          listingStatus.includes('sstc') ||
+          listingStatus.startsWith('sold ') ||
+          listingStatus.includes('sold subject to contract')
+        ) {
+          return false;
+        }
+      }
 
       const price = parsePrice(l.Price);
       return price >= lo && price <= hi;
@@ -569,7 +609,7 @@ export default function MapScreen() {
   };
 
   const resetFilters = () => {
-    const def = { minPrice: '0', maxPrice: isRental ? '2000' : '400000', beds: '', baths: '' };
+    const def = { minPrice: '0', maxPrice: isRental ? '2000' : '400000', beds: '', baths: '', includeSoldProperties: false };
     setFilters(def);
     setFiltersTouched(false);
     AsyncStorage.removeItem(FILTER_STORAGE_KEY);
@@ -1116,6 +1156,19 @@ export default function MapScreen() {
 
               <View style={styles.filterSectionCard}>
                 <View style={styles.sectionTitleRow}>
+                  <Text style={styles.inputLabel}>Include sold properties</Text>
+                  <Switch
+                    value={Boolean(filters.includeSoldProperties)}
+                    onValueChange={(value) => updateFilters({ ...filters, includeSoldProperties: value })}
+                  />
+                </View>
+                <Text style={styles.sectionHintText}>
+                  Off by default. Turn on only if you want Sold STC / sold listings in the search and shortlist.
+                </Text>
+              </View>
+
+              <View style={styles.filterSectionCard}>
+                <View style={styles.sectionTitleRow}>
                   <Text style={styles.inputLabel}>Price range</Text>
                   <Text style={styles.sectionValueText}>{minPriceLabel} - {maxPriceLabel}</Text>
                 </View>
@@ -1409,10 +1462,21 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 10,
   },
-  searchModeSwitchTitle: {
-    color: '#111827',
+  sectionTitleText: {
+    color: APP_PURPLE,
     fontSize: 12,
     fontWeight: '900',
+  },
+  sectionValueText: {
+    color: APP_PURPLE,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  sectionHintText: {
+    color: '#64748B',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 8,
   },
   searchModeSwitchSubtitle: {
     color: '#64748B',
