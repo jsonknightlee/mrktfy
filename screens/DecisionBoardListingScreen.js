@@ -109,6 +109,83 @@ const getMediaIcon = (mediaType) => {
 const isImageMedia = (item) => String(item?.mediaType || '').toLowerCase() === 'photo';
 const isVideoMedia = (item) => String(item?.mediaType || '').toLowerCase() === 'video';
 
+const normalizeMimeType = (value) => {
+  const mimeType = String(value || '').trim().toLowerCase();
+  if (!mimeType || mimeType === 'application/octet-stream') return '';
+  return mimeType;
+};
+
+const inferMimeTypeFromFileName = (fileName, mediaType) => {
+  const extension = String(fileName || '').split('.').pop().toLowerCase();
+  const normalizedMediaType = String(mediaType || '').toLowerCase();
+
+  if (normalizedMediaType === 'photo') {
+    if (['jpg', 'jpeg', 'jpe'].includes(extension)) return 'image/jpeg';
+    if (extension === 'png') return 'image/png';
+    if (extension === 'gif') return 'image/gif';
+    if (extension === 'webp') return 'image/webp';
+    if (extension === 'heic') return 'image/heic';
+    if (extension === 'heif') return 'image/heif';
+    if (extension === 'bmp') return 'image/bmp';
+    return 'image/jpeg';
+  }
+
+  if (normalizedMediaType === 'video') {
+    if (extension === 'mp4') return 'video/mp4';
+    if (extension === 'mov') return 'video/quicktime';
+    if (extension === 'm4v') return 'video/x-m4v';
+    if (extension === 'webm') return 'video/webm';
+    return 'video/quicktime';
+  }
+
+  if (normalizedMediaType === 'audio') {
+    if (extension === 'mp3') return 'audio/mpeg';
+    if (extension === 'm4a') return 'audio/mp4';
+    if (extension === 'aac') return 'audio/aac';
+    if (extension === 'wav') return 'audio/wav';
+    if (extension === 'ogg') return 'audio/ogg';
+    return 'audio/mpeg';
+  }
+
+  if (extension === 'pdf') return 'application/pdf';
+  if (extension === 'doc') return 'application/msword';
+  if (extension === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (extension === 'txt') return 'text/plain';
+
+  return '';
+};
+
+const getUploadContentTypeCandidates = (uploadContentType, mimeType, mediaType) => {
+  const candidates = [
+    normalizeMimeType(uploadContentType),
+    normalizeMimeType(mimeType),
+  ];
+
+  const normalizedMediaType = String(mediaType || '').toLowerCase();
+  if (normalizedMediaType === 'photo') candidates.push('image/jpeg');
+  if (normalizedMediaType === 'video') candidates.push('video/quicktime');
+  if (normalizedMediaType === 'audio') candidates.push('audio/mpeg');
+  candidates.push('');
+
+  return Array.from(new Set(candidates.filter((item) => item !== undefined && item !== null)));
+};
+
+const safeUrlSummary = (value) => {
+  try {
+    const url = new URL(String(value || ''));
+    return {
+      origin: url.origin,
+      pathname: url.pathname,
+    };
+  } catch {
+    return { value: String(value || '') };
+  }
+};
+
+const logUploadAttempt = (label, details) => {
+  console.log(`📤 [DecisionBoardUpload] ${label}:`, JSON.stringify(details, null, 2));
+};
+
 const createVideoHtml = (url, { autoplay = false } = {}) => `
 <!doctype html>
 <html>
@@ -847,7 +924,17 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       const fileResponse = await fetch(asset.uri);
       const fileBlob = await fileResponse.blob();
       const fileName = asset.name || `${mediaType.toLowerCase()}-attachment`;
-      const mimeType = asset.mimeType || fileBlob.type || 'application/octet-stream';
+      const mimeType =
+        normalizeMimeType(asset.mimeType) ||
+        normalizeMimeType(fileBlob.type) ||
+        inferMimeTypeFromFileName(fileName, mediaType) ||
+        (mediaType === 'Photo'
+          ? 'image/jpeg'
+          : mediaType === 'Video'
+            ? 'video/quicktime'
+            : mediaType === 'Audio'
+              ? 'audio/mpeg'
+              : 'application/octet-stream');
       const fileSizeBytes = asset.size || fileBlob.size;
 
       if (!fileSizeBytes) {
@@ -861,16 +948,87 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
         fileSizeBytes,
       });
 
-      const uploadResponse = await fetch(upload.uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': upload.contentType || mimeType,
-        },
-        body: fileBlob,
+      logUploadAttempt('presigned-url-response', {
+        decisionBoardListingId: decisionListing.id,
+        mediaType,
+        fileName,
+        mimeType,
+        fileSizeBytes,
+        uploadUrl: safeUrlSummary(upload.uploadUrl),
+        fileUrl: safeUrlSummary(upload.fileUrl),
+        storageProvider: upload.storageProvider,
+        storageBucket: upload.storageBucket,
+        storageKey: upload.storageKey,
+        contentTypeFromServer: upload.contentType || null,
+        contentTypeCandidates: getUploadContentTypeCandidates(upload.contentType, mimeType, mediaType),
       });
 
-      if (!uploadResponse.ok) {
-        throw new Error('The file could not be uploaded to storage.');
+      const contentTypeCandidates = getUploadContentTypeCandidates(upload.contentType, mimeType, mediaType);
+      let uploaded = false;
+      let lastUploadError = '';
+
+      for (const contentType of contentTypeCandidates) {
+        const headers = {};
+        if (contentType) {
+          headers['Content-Type'] = contentType;
+        }
+
+        logUploadAttempt('storage-put-start', {
+          decisionBoardListingId: decisionListing.id,
+          mediaType,
+          fileName,
+          contentType: contentType || '(no content-type)',
+          fileSizeBytes,
+          uploadUrl: safeUrlSummary(upload.uploadUrl),
+        });
+
+        const uploadResponse = await fetch(upload.uploadUrl, {
+          method: 'PUT',
+          headers,
+          body: fileBlob,
+        });
+
+        if (uploadResponse.ok) {
+          uploaded = true;
+          break;
+        }
+
+        lastUploadError = await uploadResponse.text().catch(() => '');
+        logUploadAttempt('storage-put-failed', {
+          decisionBoardListingId: decisionListing.id,
+          mediaType,
+          fileName,
+          status: uploadResponse.status,
+          statusText: uploadResponse.statusText,
+          contentType: contentType || '(no content-type)',
+          responseText: lastUploadError || '(empty)',
+          responseHeaders: Object.fromEntries(
+            Array.from(uploadResponse.headers.entries()).map(([key, value]) => [key, value])
+          ),
+        });
+        console.warn(
+          'Decision board upload failed:',
+          uploadResponse.status,
+          contentType || '(no content-type)',
+          lastUploadError
+        );
+      }
+
+      if (!uploaded) {
+        console.error('📤 [DecisionBoardUpload] upload exhausted all content-type attempts', {
+          decisionBoardListingId: decisionListing.id,
+          mediaType,
+          fileName,
+          fileSizeBytes,
+          mimeType,
+          contentTypeCandidates,
+          lastUploadError: lastUploadError || '(empty)',
+        });
+        throw new Error(
+          lastUploadError
+            ? `The file could not be uploaded to storage. ${lastUploadError}`
+            : 'The file could not be uploaded to storage.'
+        );
       }
 
       const mediaItem = await addDecisionBoardMedia(decisionListing.id, {
