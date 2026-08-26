@@ -1,5 +1,5 @@
 // navigation/AppNavigator.js
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -28,6 +28,7 @@ import PrivacyNoticeModal from '../components/PrivacyNoticeModal';
 import { acknowledgePrivacyNotice } from '../services/authApi';
 
 import { AuthContext } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 
 const PRIVACY_POLICY_URL = 'https://mrktfy.com/privacy-policy';
 const TERMS_AND_CONDITIONS_URL = 'https://mrktfy.com/terms-and-conditions';
@@ -76,6 +77,10 @@ function BuyStackNavigator({ route }) {
 }
 
 function MainTabs() {
+  useEffect(() => {
+    console.log('[AUTHFLOW] entering main app');
+  }, []);
+
   return (
     <Tab.Navigator screenOptions={{ headerShown: false }}>
       <Tab.Screen
@@ -109,17 +114,37 @@ function MainTabs() {
 
 export default function AppNavigator() {
   const { isLoggedIn, userProfile, setUserProfile, refreshUserProfile, persistPrivacyNoticeAcknowledgement } = useContext(AuthContext);
+  const { userProfile: subscriptionUserProfile } = useSubscription();
   const [privacyNoticeSubmitting, setPrivacyNoticeSubmitting] = useState(false);
+  const effectiveUserProfile = subscriptionUserProfile || userProfile;
 
   const requiresPrivacyNotice = useMemo(
-    () => getPrivacyNoticeRequirement(userProfile),
-    [userProfile]
+    () => getPrivacyNoticeRequirement(effectiveUserProfile),
+    [effectiveUserProfile]
   );
 
   const privacyNoticePayload = useMemo(() => ({
-    privacyNoticeVersion: userProfile?.currentPrivacyNoticeVersion ?? userProfile?.privacyNoticeVersion ?? '1.0',
-    termsVersion: userProfile?.currentTermsVersion ?? userProfile?.termsVersion ?? '1.0',
-  }), [userProfile]);
+    privacyNoticeVersion: effectiveUserProfile?.currentPrivacyNoticeVersion ?? effectiveUserProfile?.privacyNoticeVersion ?? '1.0',
+    termsVersion: effectiveUserProfile?.currentTermsVersion ?? effectiveUserProfile?.termsVersion ?? '1.0',
+  }), [effectiveUserProfile]);
+
+  useEffect(() => {
+    console.log('[AUTHFLOW] navigation state', {
+      isLoggedIn,
+      privacyRequired: requiresPrivacyNotice,
+      privacyNoticeSubmitting,
+      hasUserProfile: Boolean(userProfile),
+      hasSubscriptionProfile: Boolean(subscriptionUserProfile),
+      profileCompletionRequired: false,
+    });
+  }, [isLoggedIn, requiresPrivacyNotice, privacyNoticeSubmitting, userProfile, subscriptionUserProfile]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    console.log('[AUTHFLOW] login authenticated');
+    console.log('[AUTHFLOW] privacy required =', Boolean(requiresPrivacyNotice));
+    console.log('[AUTHFLOW] profile completion required =', false);
+  }, [isLoggedIn, requiresPrivacyNotice]);
 
   const handlePrivacyNoticeContinue = async () => {
     if (privacyNoticeSubmitting) return;

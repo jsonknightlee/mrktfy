@@ -1,9 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
 
-export async function saveToken(token) {
-  console.log("Login response data:", token);
-  console.log("token type:", typeof token);
+const VERBOSE_TOKEN_LOGS = __DEV__ && process.env.EXPO_PUBLIC_VERBOSE_API_LOGS === 'true';
 
+export async function saveToken(token) {
   // Handle both direct string tokens and object responses
   const tokenToSave = typeof token === 'string' ? token : token?.token;
   
@@ -12,7 +11,9 @@ export async function saveToken(token) {
     throw new Error("Login response missing token");
   }
   
-  console.log("💾 Saving token (first 30 chars):", tokenToSave.substring(0, 30) + "...");
+  if (VERBOSE_TOKEN_LOGS) {
+    console.log("💾 Saving token:", tokenToSave ? '[redacted]' : 'none');
+  }
   await SecureStore.setItemAsync('auth_token', tokenToSave);
 }
 

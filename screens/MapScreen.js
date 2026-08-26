@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchNearbyListings } from '../services/realEstateApi';
 import { getToken } from '../utils/tokenStorage';
 import Constants from "expo-constants";
+import { Platform } from 'react-native';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { AdBanner } from '../services/adService';
@@ -24,6 +25,14 @@ import {
   getPropertyDeckLimit,
   getPropertyDecks,
 } from '../services/PropertyDeckService';
+import {
+  DEFAULT_UK_LOCATION,
+  LOCATION_INIT_TIMEOUT_MS,
+  buildProfileLocationQuery,
+  withTimeout,
+  resolveInitialMapLocation,
+  normalizeLocationCandidate,
+} from '../utils/locationBootstrap';
 
 // Show only if the date is before today (local device timezone)
 const isBeforeToday = (iso) => {
@@ -88,6 +97,10 @@ const getSearchLocationLabel = (location) => {
 };
 
 export default function MapScreen() {
+  useEffect(() => {
+    console.log('[AUTHFLOW] MapScreen mounting');
+  }, []);
+
   const [userLocation, setUserLocation] = useState(null);
   const [listings, setListings] = useState([]);
   const [filteredListings, setFilteredListings] = useState([]);
@@ -185,6 +198,7 @@ export default function MapScreen() {
   const activeSearchLocationLabel = searchLocationEnabled && searchLocation
     ? getSearchLocationLabel(searchLocation)
     : 'Current location';
+  const mapCenterLocation = activeSearchLocation || userLocation || DEFAULT_UK_LOCATION;
 
   // Zoom the initial map view out enough to comfortably fit the full
   // subscription search-radius circle (bigger tiers = wider radius = more zoomed out).
@@ -192,10 +206,10 @@ export default function MapScreen() {
     const radiusKm = getMaxSearchRadius();
     const paddingMultiplier = 2.6; // extra breathing room around the radius circle
     const latitudeDelta = (radiusKm * 2 * paddingMultiplier) / 111;
-    const latitudeForLongitude = activeSearchLocation?.latitude ?? userLocation?.latitude ?? 0;
+    const latitudeForLongitude = mapCenterLocation?.latitude ?? 0;
     const longitudeDelta = latitudeDelta / Math.max(Math.cos((latitudeForLongitude * Math.PI) / 180), 0.1);
     return { latitudeDelta, longitudeDelta };
-  }, [currentTier, activeSearchLocation?.latitude, userLocation?.latitude]);
+  }, [currentTier, mapCenterLocation?.latitude]);
 
   const getListingPinColor = (listing) => {
     const status = getFavoriteStatus(listing.ID);
@@ -344,8 +358,9 @@ export default function MapScreen() {
     setSearchLocationInputVisible(false);
     await AsyncStorage.removeItem(SEARCH_LOCATION_STORAGE_KEY);
 
-    if (userLocation?.latitude && userLocation?.longitude) {
-      await loadListingsForLocation(userLocation, isRental ? TYPE_RENT : TYPE_SALE);
+    const nextCurrentLocation = userLocation || DEFAULT_UK_LOCATION;
+    if (nextCurrentLocation?.latitude && nextCurrentLocation?.longitude) {
+      await loadListingsForLocation(nextCurrentLocation, isRental ? TYPE_RENT : TYPE_SALE);
     }
   };
 
@@ -445,25 +460,110 @@ export default function MapScreen() {
     const debounceId = setTimeout(() => {
       (async () => {
         setLocationSearchReady(false);
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (cancelled) return;
-        if (status !== 'granted') {
-          console.warn('Location permission denied');
-          setLocationSearchReady(true);
-          return;
-        }
+        console.log('📍 [MAP] Initial location bootstrap starting', {
+          platform: Platform.OS,
+          isPad: Platform.OS === 'ios' && Platform.isPad,
+          tier: currentTier,
+          rental: isRental,
+        });
 
         try {
-          const loc = await Location.getCurrentPositionAsync({});
-          if (cancelled) return;
-          const { latitude, longitude } = loc.coords;
-          const nextUserLocation = { latitude, longitude, label: 'Current location', source: 'user' };
+          const storedSearchLocation = await (async () => {
+            try {
+              const [storedSearchLocationRaw, storedSearchHistoryRaw] = await Promise.all([
+                AsyncStorage.getItem(SEARCH_LOCATION_STORAGE_KEY),
+                AsyncStorage.getItem(SEARCH_LOCATION_HISTORY_STORAGE_KEY),
+              ]);
 
-          setUserLocation(nextUserLocation);
+              const directSavedLocation = storedSearchLocationRaw
+                ? normalizeLocationCandidate(JSON.parse(storedSearchLocationRaw), { label: 'Saved search location', source: 'saved' })
+                : null;
+
+              if (directSavedLocation) {
+                return directSavedLocation;
+              }
+
+              if (storedSearchHistoryRaw) {
+                const parsedHistory = JSON.parse(storedSearchHistoryRaw);
+                const latestHistoryItem = Array.isArray(parsedHistory) ? parsedHistory[0] : null;
+                return normalizeLocationCandidate(latestHistoryItem, { label: 'Saved search location', source: 'saved' });
+              }
+            } catch (error) {
+              console.warn('📍 [MAP] Failed to load saved search location:', error?.message || error);
+            }
+
+            return null;
+          })();
+
+          const profileFallbackLocation = await (async () => {
+            const profileQuery = buildProfileLocationQuery(userProfile);
+            if (!profileQuery) return null;
+
+            try {
+              const geocodeResults = await withTimeout(
+                () => Location.geocodeAsync(profileQuery),
+                LOCATION_INIT_TIMEOUT_MS,
+                'profile-location-geocode'
+              );
+              const geocodeCandidate = geocodeResults?.[0];
+              return normalizeLocationCandidate(
+                geocodeCandidate
+                  ? {
+                      latitude: geocodeCandidate.latitude,
+                      longitude: geocodeCandidate.longitude,
+                      label: profileQuery,
+                      query: profileQuery,
+                      source: 'profile',
+                    }
+                  : null,
+                { label: profileQuery, query: profileQuery, source: 'profile' }
+              );
+            } catch (error) {
+              console.warn('📍 [MAP] Failed to geocode profile location fallback:', error?.message || error);
+              return null;
+            }
+          })();
+
+          const resolvedLocation = await resolveInitialMapLocation({
+            timeoutMs: LOCATION_INIT_TIMEOUT_MS,
+            hasServicesEnabled: async () => {
+              console.log('📍 [MAP] Location services check starting');
+              const enabled = await Location.hasServicesEnabledAsync();
+              console.log('📍 [MAP] Location services check result:', enabled);
+              return enabled;
+            },
+            requestForegroundPermission: async () => {
+              console.log('📍 [MAP] Requesting foreground location permission');
+              const permission = await Location.requestForegroundPermissionsAsync();
+              console.log('📍 [MAP] Foreground permission result:', permission?.status || 'unknown');
+              return permission;
+            },
+            getCurrentPosition: async () => {
+              console.log('📍 [MAP] Current location fetch starting');
+              const loc = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              });
+              console.log('📍 [MAP] Current location fetch success:', loc?.coords ? JSON.stringify(loc.coords) : 'No coords');
+              return loc;
+            },
+            getSavedLocation: async () => storedSearchLocation,
+            getProfileLocation: async () => profileFallbackLocation,
+            defaultLocation: DEFAULT_UK_LOCATION,
+            log: (step, details) => {
+              console.log(`📍 [MAP] ${step}`, details ? JSON.stringify(details) : '');
+            },
+          });
 
           if (cancelled) return;
+          setUserLocation(resolvedLocation.location || DEFAULT_UK_LOCATION);
+          if (resolvedLocation.source === 'saved' || resolvedLocation.source === 'profile') {
+            setSearchLocation(resolvedLocation.searchLocation || null);
+            setSearchLocationQuery(resolvedLocation.searchLocation?.query || resolvedLocation.searchLocation?.label || '');
+            setSearchLocationInputVisible(false);
+          }
+
           const nearby = await loadListingsForLocation(
-            nextUserLocation,
+            resolvedLocation.searchLocation || resolvedLocation.location || DEFAULT_UK_LOCATION,
             isRental ? TYPE_RENT : TYPE_SALE,
             { silentEmpty: true }
           );
@@ -471,18 +571,13 @@ export default function MapScreen() {
           if (cancelled) return;
 
           if (nearby?.length === 0) {
-            if (initialNearbyRetryTimerRef.current) {
-              clearTimeout(initialNearbyRetryTimerRef.current);
-            }
-
-            initialNearbyRetryTimerRef.current = setTimeout(async () => {
-              if (cancelled) return;
-              await loadListingsForLocation(nextUserLocation, isRental ? TYPE_RENT : TYPE_SALE);
-              initialNearbyRetryTimerRef.current = null;
-            }, 2000);
+            console.warn('📍 [MAP] Initial listing fetch returned no results. Showing map/search UI with fallback location.');
           }
         } finally {
-          if (!cancelled) setLocationSearchReady(true);
+          if (!cancelled) {
+            setLocationSearchReady(true);
+            console.log('📍 [MAP] Location bootstrap complete. Loading state cleared.');
+          }
         }
       })();
     }, 250);
@@ -495,7 +590,7 @@ export default function MapScreen() {
         initialNearbyRetryTimerRef.current = null;
       }
     };
-  }, [isRental, currentTier, loading]);
+  }, [isRental, currentTier, loading, userProfile]);
 
   useEffect(() => {
     if (!userLocation || !searchLocationEnabled || searchLocation) return;
@@ -780,7 +875,7 @@ export default function MapScreen() {
   const bedsLabel = formatMinimumRoomLabel(filters.beds);
   const bathsLabel = formatMinimumRoomLabel(filters.baths);
 
-  if (!userLocation || !locationSearchReady) {
+  if (!locationSearchReady) {
     return (
       <View style={styles.center}>
         <Text>Loading your location...</Text>
@@ -951,12 +1046,12 @@ export default function MapScreen() {
 
       {mapVisible && (
         <MapView
-          key={`${activeSearchLocation?.latitude || userLocation.latitude}-${activeSearchLocation?.longitude || userLocation.longitude}`}
+          key={`${mapCenterLocation.latitude}-${mapCenterLocation.longitude}`}
           style={styles.map}
           showsUserLocation
           initialRegion={{
-            latitude: activeSearchLocation?.latitude || userLocation.latitude,
-            longitude: activeSearchLocation?.longitude || userLocation.longitude,
+            latitude: mapCenterLocation.latitude,
+            longitude: mapCenterLocation.longitude,
             latitudeDelta: mapInitialDelta.latitudeDelta,
             longitudeDelta: mapInitialDelta.longitudeDelta,
           }}

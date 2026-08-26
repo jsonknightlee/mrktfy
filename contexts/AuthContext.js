@@ -76,16 +76,28 @@ export default function AuthProvider({ children }) {
   const [isLoggedIn, setIsLoggedIn] = useState(null); // null = checking
   const [userProfile, setUserProfile] = useState(null);
 
-  const refreshUserProfile = async () => {
+const refreshUserProfile = async () => {
+    console.log('🔐 [AUTHFLOW] user profile refresh starting');
     const token = await getToken();
     if (!token) {
+      console.log('🔐 [AUTHFLOW] user profile refresh skipped - no token');
       setUserProfile(null);
       return null;
     }
 
     try {
       const profile = await fetchUserProfile(token);
+      console.log('🔐 [AUTHFLOW] user profile loaded', {
+        hasProfile: Boolean(profile),
+        userId: profile?.ID ?? profile?.UserID ?? null,
+        username: profile?.Username ?? null,
+      });
       const mergedProfile = await mergeProfileWithPrivacyNoticeState(profile || null);
+      console.log('🔐 [AUTHFLOW] privacy state merged into profile', {
+        requiresPrivacyNotice: mergedProfile?.requiresPrivacyNotice === true,
+        privacyNoticeAcceptedDate: mergedProfile?.privacyNoticeAcceptedDate ?? null,
+        termsAcceptedDate: mergedProfile?.termsAcceptedDate ?? null,
+      });
       setUserProfile(mergedProfile);
       return mergedProfile;
     } catch (error) {
@@ -98,14 +110,27 @@ export default function AuthProvider({ children }) {
     (async () => {
       const token = await getToken();
       if (!token) {
+        console.log('🔐 [AUTHFLOW] initial auth check - no token found');
         setUserProfile(null);
         return setIsLoggedIn(false);
       }
       try {
+        console.log('🔐 [AUTHFLOW] initial auth check - token found, loading profile');
         const profile = await fetchUserProfile(token);
+        console.log('🔐 [AUTHFLOW] user profile loaded', {
+          hasProfile: Boolean(profile),
+          userId: profile?.ID ?? profile?.UserID ?? null,
+          username: profile?.Username ?? null,
+        });
         const mergedProfile = await mergeProfileWithPrivacyNoticeState(profile || null);
+        console.log('🔐 [AUTHFLOW] privacy state merged into initial profile', {
+          requiresPrivacyNotice: mergedProfile?.requiresPrivacyNotice === true,
+          privacyNoticeAcceptedDate: mergedProfile?.privacyNoticeAcceptedDate ?? null,
+          termsAcceptedDate: mergedProfile?.termsAcceptedDate ?? null,
+        });
         setUserProfile(mergedProfile);
         setIsLoggedIn(true);
+        console.log('🔐 [AUTHFLOW] login authenticated');
       } catch {
         await deleteToken();
         setUserProfile(null);
@@ -126,12 +151,32 @@ export default function AuthProvider({ children }) {
       await saveToken(token);
       console.log('🔐 Auth: Token saved');
       if (profile) {
+        console.log('🔐 [AUTHFLOW] user profile loaded', {
+          hasProfile: true,
+          userId: profile?.ID ?? profile?.UserID ?? null,
+          username: profile?.Username ?? null,
+        });
         const mergedProfile = await mergeProfileWithPrivacyNoticeState(profile);
+        console.log('🔐 [AUTHFLOW] privacy state merged into signed-in profile', {
+          requiresPrivacyNotice: mergedProfile?.requiresPrivacyNotice === true,
+          privacyNoticeAcceptedDate: mergedProfile?.privacyNoticeAcceptedDate ?? null,
+          termsAcceptedDate: mergedProfile?.termsAcceptedDate ?? null,
+        });
         setUserProfile(mergedProfile);
       } else {
         try {
           const fetchedProfile = await fetchUserProfile(token);
+          console.log('🔐 [AUTHFLOW] user profile loaded', {
+            hasProfile: Boolean(fetchedProfile),
+            userId: fetchedProfile?.ID ?? fetchedProfile?.UserID ?? null,
+            username: fetchedProfile?.Username ?? null,
+          });
           const mergedProfile = await mergeProfileWithPrivacyNoticeState(fetchedProfile || null);
+          console.log('🔐 [AUTHFLOW] privacy state merged into signed-in profile', {
+            requiresPrivacyNotice: mergedProfile?.requiresPrivacyNotice === true,
+            privacyNoticeAcceptedDate: mergedProfile?.privacyNoticeAcceptedDate ?? null,
+            termsAcceptedDate: mergedProfile?.termsAcceptedDate ?? null,
+          });
           setUserProfile(mergedProfile);
         } catch (error) {
           console.error('❌ Auth: Failed to fetch profile during signIn:', error);
@@ -139,6 +184,8 @@ export default function AuthProvider({ children }) {
         }
       }
       setIsLoggedIn(true);
+      console.log('🔐 Auth: login success - app shell can mount');
+      console.log('🔐 [AUTHFLOW] login authenticated');
       console.log('🔐 Auth: setIsLoggedIn(true) called');
       console.log('🔐 Auth: signIn completed');
     },

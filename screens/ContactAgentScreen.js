@@ -101,7 +101,7 @@ export default function ContactAgentScreen({ route, navigation }) {
 
       Alert.alert(
         'Enquiry saved',
-        'This enquiry is now in the manual Zoopla send queue.',
+        'Your email has been sent to the agent.',
         [
           zooplaContactUrl
             ? { text: 'Open Zoopla', onPress: () => Linking.openURL(zooplaContactUrl) }

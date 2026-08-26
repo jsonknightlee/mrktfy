@@ -92,7 +92,7 @@ export default function ProfileScreen({ navigation }) {
         // Extract user info from JWT token
         try {
           const tokenPayload = JSON.parse(atob(token.split('.')[1]));
-          console.log('🔑 [PROFILE] Token payload:', tokenPayload);
+          console.log('🔑 [PROFILE] Token payload decoded:', Boolean(tokenPayload));
           setUserInfo(tokenPayload);
         } catch (tokenError) {
           console.error('❌ [PROFILE] Failed to parse token:', tokenError);

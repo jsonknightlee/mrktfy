@@ -1084,6 +1084,10 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
     }
   };
 
+  const closeVideoViewer = () => {
+    setVideoViewer(null);
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -1402,12 +1406,17 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
       <Modal
         visible={Boolean(videoViewer?.url)}
         animationType="slide"
-        onRequestClose={() => setVideoViewer(null)}
+        onRequestClose={closeVideoViewer}
       >
         <View style={styles.videoModal}>
           <View style={styles.videoModalHeader}>
             <Text style={styles.videoModalTitle} numberOfLines={1}>{videoViewer?.title || 'Video'}</Text>
-            <TouchableOpacity style={styles.videoCloseButton} onPress={() => setVideoViewer(null)}>
+            <TouchableOpacity
+              style={styles.videoCloseButton}
+              onPress={closeVideoViewer}
+              accessibilityRole="button"
+              accessibilityLabel="Close video viewer"
+            >
               <Ionicons name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
@@ -1416,6 +1425,7 @@ export default function DecisionBoardListingScreen({ route, navigation }) {
               source={{ html: createVideoHtml(videoViewer.url, { autoplay: true }) }}
               allowsInlineMediaPlayback
               mediaPlaybackRequiresUserAction={false}
+              onShouldStartLoadWithRequest={() => true}
               style={styles.videoPlayer}
             />
           ) : null}

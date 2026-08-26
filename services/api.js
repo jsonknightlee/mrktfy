@@ -2,16 +2,21 @@
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { getToken } from '../utils/tokenStorage';
+import { redactHeaders, redactRequestConfig, redactAuthPayload } from '../utils/logRedaction';
 
 const extra = Constants.expoConfig?.extra ?? Constants.manifest?.extra ?? {};
 const API_BASE_URL = extra.API_BASE_URL || process.env.EXPO_PUBLIC_API_BASE_URL || '';
 const API_BACKUP_BASE_URL = extra.API_BACKUP_BASE_URL || process.env.EXPO_PUBLIC_API_BACKUP_BASE_URL || '';
 const API_KEY = extra.API_KEY || process.env.EXPO_PUBLIC_API_KEY || '';
 
-console.log('🔧 [API] Expo config extra:', extra);
-console.log('🔧 [API] Resolved API_BASE_URL:', API_BASE_URL || 'NOT SET');
-console.log('🔧 [API] Resolved API_BACKUP_BASE_URL:', API_BACKUP_BASE_URL || 'NOT SET');
-console.log('🔧 [API] API_KEY from config:', API_KEY ? 'SET' : 'NOT SET');
+const VERBOSE_API_LOGS = __DEV__ && process.env.EXPO_PUBLIC_VERBOSE_API_LOGS === 'true';
+
+if (VERBOSE_API_LOGS) {
+  console.log('🔧 [API] Expo config extra:', redactAuthPayload(extra));
+  console.log('🔧 [API] Resolved API_BASE_URL:', API_BASE_URL || 'NOT SET');
+  console.log('🔧 [API] Resolved API_BACKUP_BASE_URL:', API_BACKUP_BASE_URL || 'NOT SET');
+  console.log('🔧 [API] API_KEY from config:', API_KEY ? 'SET' : 'NOT SET');
+}
 if (!API_BASE_URL) {
   console.warn('⚠️ [API] API_BASE_URL is empty. Login and API calls will fail until a production backend URL is injected.');
 }
@@ -21,7 +26,9 @@ const commonHeaders = {
   'x-api-key': API_KEY,
 };
 
-console.log('🔧 [API] Final commonHeaders:', commonHeaders);
+if (VERBOSE_API_LOGS) {
+  console.log('🔧 [API] Final commonHeaders:', redactHeaders(commonHeaders));
+}
 
 // App-wide API (non-auth routes)
 export const api = axios.create({
@@ -37,9 +44,11 @@ export const authApi = axios.create({
   timeout: 15000,
 });
 
-console.log('🔧 [API] Created API instances with baseURL:', API_BASE_URL);
-console.log('🔧 [API] Auth API baseURL:', `${API_BASE_URL}/auth`);
-console.log('🔧 [API] Backup API baseURL:', API_BACKUP_BASE_URL || 'NOT SET');
+if (VERBOSE_API_LOGS) {
+  console.log('🔧 [API] Created API instances with baseURL:', API_BASE_URL);
+  console.log('🔧 [API] Auth API baseURL:', `${API_BASE_URL}/auth`);
+  console.log('🔧 [API] Backup API baseURL:', API_BACKUP_BASE_URL || 'NOT SET');
+}
 
 const shouldRetryWithBackup = (error) => (
   API_BACKUP_BASE_URL &&
@@ -80,46 +89,37 @@ const attachBackupRetry = (instance, backupBaseURL, label) =>
 
 // Add request interceptor to log exact requests
 authApi.interceptors.request.use((config) => {
-  console.log('🔐 [API] LOGIN REQUEST BEING SENT:');
-  console.log('🔐 - Full URL:', `${config.baseURL}${config.url}`);
-  console.log('🔐 - Method:', config.method?.toUpperCase());
-  console.log('🔐 - Headers:', JSON.stringify(config.headers, null, 2));
-  console.log('🔐 - Data:', config.data ? JSON.stringify(config.data, null, 2) : 'None');
-  console.log('🔐 - Full Config:', JSON.stringify({
-    method: config.method,
-    url: config.url,
-    baseURL: config.baseURL,
-    headers: config.headers,
-    data: config.data
-  }, null, 2));
+  if (VERBOSE_API_LOGS) {
+    console.log('🔐 [API] LOGIN REQUEST BEING SENT:', JSON.stringify(redactRequestConfig(config), null, 2));
+  }
   return config;
 });
 
 // Add response interceptor to log responses
 authApi.interceptors.response.use(
   (response) => {
-    console.log('🔐 [API] LOGIN RESPONSE SUCCESS:');
-    console.log('🔐 - Status:', response.status);
-    console.log('🔐 - Headers:', JSON.stringify(response.headers, null, 2));
-    console.log('🔐 - Data:', JSON.stringify(response.data, null, 2));
+    if (VERBOSE_API_LOGS) {
+      console.log('🔐 [API] LOGIN RESPONSE SUCCESS:', JSON.stringify({
+        status: response.status,
+        headers: redactHeaders(response.headers),
+        data: response.data,
+      }, null, 2));
+    }
     return response;
   },
   (error) => {
-    console.log('🔐 [API] LOGIN RESPONSE ERROR:');
-    console.log('🔐 - Error:', error.message);
-    console.log('🔐 - Code:', error.code);
-    console.log('🔐 - Response:', error.response ? {
-      status: error.response.status,
-      data: error.response.data,
-      headers: error.response.headers
-    } : 'No response');
-    console.log('🔐 - Config:', error.config ? {
-      method: error.config.method,
-      url: error.config.url,
-      baseURL: error.config.baseURL,
-      headers: error.config.headers,
-      data: error.config.data
-    } : 'No config');
+    if (VERBOSE_API_LOGS) {
+      console.log('🔐 [API] LOGIN RESPONSE ERROR:', JSON.stringify({
+        message: error.message,
+        code: error.code,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data,
+          headers: redactHeaders(error.response.headers),
+        } : 'No response',
+        config: error.config ? redactRequestConfig(error.config) : 'No config',
+      }, null, 2));
+    }
     return Promise.reject(error);
   }
 );

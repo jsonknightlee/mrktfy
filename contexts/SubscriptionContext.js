@@ -593,7 +593,7 @@ export function SubscriptionProvider({ children }) {
           let userId = 'current-user'; // fallback
           try {
             const tokenPayload = JSON.parse(atob(token.split('.')[1]));
-            console.log('🔑 [SUBSCRIPTION] Token payload:', tokenPayload);
+            console.log('🔑 [SUBSCRIPTION] Token payload decoded:', Boolean(tokenPayload));
             userId = tokenPayload.ID || tokenPayload.userId || tokenPayload.sub || 'current-user';
             console.log('🔑 [SUBSCRIPTION] Extracted userId:', userId);
           } catch (tokenError) {
@@ -612,7 +612,7 @@ export function SubscriptionProvider({ children }) {
           try {
             const userProfile = await databaseService.getUserProfile(userId);
             console.log('👤 [SUBSCRIPTION] getUserProfile result:', userProfile ? 'Success' : 'Failed/Null');
-            console.log('👤 [SUBSCRIPTION] User profile data:', userProfile ? JSON.stringify(userProfile, null, 2) : 'No data');
+            console.log('👤 [SUBSCRIPTION] User profile loaded:', Boolean(userProfile));
             
             if (userProfile) {
               console.log('👤 [SUBSCRIPTION] Loaded user profile from database:', userProfile.SubscriptionLevelID);
@@ -705,7 +705,7 @@ export function SubscriptionProvider({ children }) {
               
               if (userProfile) {
                 console.log('👤 [SUBSCRIPTION] ===== DATABASE RESULT =====');
-                console.log('👤 [SUBSCRIPTION] User profile data:', JSON.stringify(userProfile, null, 2));
+                console.log('👤 [SUBSCRIPTION] User profile loaded:', Boolean(userProfile));
                 console.log('👤 [SUBSCRIPTION] SubscriptionLevelID:', userProfile.SubscriptionLevelID);
                 console.log('👤 [SUBSCRIPTION] IsSubscriptionActive:', userProfile.IsSubscriptionActive);
                 console.log('👤 [SUBSCRIPTION] =======================');
@@ -1450,7 +1450,7 @@ export function SubscriptionProvider({ children }) {
         // Try to load user profile first - this will override AsyncStorage if user is logged in
         const token = await getToken();
         console.log('🔄 [RELOAD] Token check result:', token ? 'Token found' : 'No token');
-        console.log('🔄 [RELOAD] Token value (first 50 chars):', token ? token.substring(0, 50) + '...' : 'none');
+        console.log('🔄 [RELOAD] Token value:', token ? 'present' : 'none');
         
         if (token) {
           if (syncIap) {
@@ -1479,7 +1479,7 @@ export function SubscriptionProvider({ children }) {
           try {
             const userProfile = await databaseService.getUserProfile(userId);
             console.log('🔄 [RELOAD] getUserProfile result:', userProfile ? 'Success' : 'Failed/Null');
-            console.log('🔄 [RELOAD] User profile data:', userProfile ? JSON.stringify(userProfile, null, 2) : 'No data');
+            console.log('🔄 [RELOAD] User profile loaded:', Boolean(userProfile));
             
             if (userProfile) {
               const subscriptionLevelId = userProfile.SubscriptionLevelID || userProfile.subscriptionLevelId;

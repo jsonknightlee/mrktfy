@@ -238,7 +238,19 @@ const generateIapCustomerToken = () => {
   });
 };
 
-const getIapCustomerStorageKey = (userId) => `${IAP_CUSTOMER_TOKEN_PREFIX}:${toNonEmptyString(userId) || 'current-user'}`;
+const makeSafeStorageKeySegment = (value) => {
+  const raw = toNonEmptyString(value) || 'current-user';
+  let hash = 2166136261;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    hash ^= raw.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `u_${(hash >>> 0).toString(36)}`;
+};
+
+const getIapCustomerStorageKey = (userId) => `${IAP_CUSTOMER_TOKEN_PREFIX}_${makeSafeStorageKeySegment(userId)}`;
 
 const resolveIapCustomerToken = async (userProfile = null, userId = null) => {
   if (Platform.OS !== 'ios') {

@@ -74,8 +74,6 @@ const hasInfoData = (value) => {
   return false;
 };
 
-const canUseDecisionBoard = (tier) => ['free', 'prospector', 'investor', 'developer'].includes(String(tier || 'free').toLowerCase());
-
 export default function ListingDetailScreen({ route, navigation }) {
   const listing = normalizeDetailListing(route.params?.listing);
   const openedFromDecisionBoard = route.params?.source === 'decisionBoard' || Boolean(route.params?.decisionBoardListingId);
@@ -101,8 +99,7 @@ export default function ListingDetailScreen({ route, navigation }) {
   const [virtualTourModalVisible, setVirtualTourModalVisible] = useState(false);
   const [floorPlanModalVisible, setFloorPlanModalVisible] = useState(false);
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
-  const { currentTier, shouldShowAd } = useSubscription();
-  const hasDecisionBoardAccess = canUseDecisionBoard(currentTier);
+  const { shouldShowAd } = useSubscription();
   const isFavorited = getFavoriteStatus(listing.ID)?.isFavorited ?? !!route.params.listing?.isFavorited;
   const lastViewedAt = getFavoriteStatus(listing.ID)?.lastViewedAt;
 
@@ -182,31 +179,6 @@ useEffect(() => {
 
   const openDial = () => Linking.openURL(`tel:${listing.AgentPhone}`);
   const openAgentEnquiry = () => navigation.navigate('ContactAgent', { listing });
-
-  const openDecisionBoard = async () => {
-    if (!hasDecisionBoardAccess) {
-      Alert.alert(
-        'Decision Board is a Buyer feature',
-        'Upgrade to Buyer to pursue listings in a Decision Board.',
-        [
-          { text: 'Not now', style: 'cancel' },
-          { text: 'View plans', onPress: () => navigation.navigate('Subscription') },
-        ]
-      );
-      return;
-    }
-
-    const listingId = getListingId(listing);
-    if (!listingId) return;
-
-    navigation.navigate('DecisionBoards', {
-      pendingListing: listing,
-      pendingSource: {
-        sourceFlow: 'listingDetail',
-        suggestedBoardName: 'Property Decisions',
-      },
-    });
-  };
 
   const generateVirtualTourUrl = () => {
     if (!listing.ListingURL) return null;
@@ -323,18 +295,6 @@ useEffect(() => {
         ) : null}
 
         <Text style={styles.description}>{String(listing.Description || '')}</Text>
-
-        {!openedFromDecisionBoard ? (
-          <TouchableOpacity
-            style={[styles.decisionButton, !hasDecisionBoardAccess && styles.decisionButtonDisabled]}
-            onPress={openDecisionBoard}
-          >
-            <Ionicons name={hasDecisionBoardAccess ? 'flag-outline' : 'lock-closed-outline'} size={20} color={hasDecisionBoardAccess ? '#fff' : '#94A3B8'} />
-            <Text style={[styles.decisionButtonText, !hasDecisionBoardAccess && styles.decisionButtonTextDisabled]}>
-              {hasDecisionBoardAccess ? 'Pursue in Decision Board' : 'Unlock Decision Board'}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
 
         {/* Mini Map */}
         <TouchableOpacity onPress={openMap} style={styles.mapContainer} activeOpacity={0.9}>
