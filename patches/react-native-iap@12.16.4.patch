@@ -1,0 +1,26 @@
+diff --git a/android/gradle.properties b/android/gradle.properties
+index 0549226..671bee2 100644
+--- a/android/gradle.properties
++++ b/android/gradle.properties
+@@ -6,7 +6,7 @@ RNIap_buildToolsVersion=33.0.0
+ RNIap_ndkversion=23.1.7779620
+ RNIap_playServicesVersion=18.1.0
+ RNIap_amazonSdkVersion=3.0.7
+-RNIap_playBillingSdkVersion=7.0.0
++RNIap_playBillingSdkVersion=8.0.0
+ RNIap_isAmazonDrmEnabled=true
+ 
+ android.useAndroidX=true
+diff --git a/android/src/play/java/com/dooboolab/rniap/RNIapModule.kt b/android/src/play/java/com/dooboolab/rniap/RNIapModule.kt
+index 54ca696..9adc51f 100644
+--- a/android/src/play/java/com/dooboolab/rniap/RNIapModule.kt
++++ b/android/src/play/java/com/dooboolab/rniap/RNIapModule.kt
+@@ -461,7 +461,7 @@ class RNIapModule(
+         isOfferPersonalized: Boolean, // New parameter in V5
+         promise: Promise,
+     ) {
+-        val activity = currentActivity
++        val activity = getReactApplicationContext().getCurrentActivity()
+         if (activity == null) {
+             promise.safeReject(PromiseUtils.E_UNKNOWN, "getCurrentActivity returned null")
+             return

@@ -72,6 +72,11 @@
     "patch-package": "^8.0.1",
     "typescript": "~5.9.2"
   },
+  "pnpm": {
+    "patchedDependencies": {
+      "react-native-iap@12.16.4": "patches/react-native-iap@12.16.4.patch"
+    }
+  },
   "packageManager": "pnpm@9.15.5",
   "private": true
 }
