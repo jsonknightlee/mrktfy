@@ -6,14 +6,14 @@ import { Platform } from 'react-native';
 import {
   initConnection,
   endConnection,
-  getSubscriptions,
-  requestSubscription,
+  fetchProducts,
+  requestPurchase,
   finishTransaction,
   purchaseUpdatedListener,
   purchaseErrorListener,
   getAvailablePurchases,
-  flushFailedPurchasesCachedAsPendingAndroid,
-  getReceiptIOS,
+  getReceiptDataIOS,
+  requestReceiptRefreshIOS,
 } from 'react-native-iap';
 
 const SUBSCRIPTION_PRODUCTS = {
@@ -66,6 +66,84 @@ const mapIapError = (error) => {
   return error;
 };
 
+const getAndroidSubscriptionOfferCandidates = (product) => {
+  if (!product || typeof product !== 'object') return [];
+
+  const candidateFields = [
+    product.subscriptionOffers,
+    product.subscriptionOfferDetails,
+    product.subscriptionOfferDetailsAndroid,
+    product.offers,
+  ];
+
+  for (const field of candidateFields) {
+    if (Array.isArray(field) && field.length > 0) {
+      return field;
+    }
+  }
+
+  return [];
+};
+
+const selectAndroidSubscriptionOffer = (product) => {
+  const offers = getAndroidSubscriptionOfferCandidates(product);
+  if (offers.length === 0) return null;
+
+  const candidatePlanIds = new Set(
+    [product?.basePlanId, product?.basePlanIdAndroid, product?.currentPlanId]
+      .filter((value) => typeof value === 'string' && value.trim() !== '')
+      .map((value) => value.trim())
+  );
+
+  const normalizedOffers = offers
+    .map((offer, index) => {
+      if (!offer || typeof offer !== 'object') return null;
+
+      const offerToken =
+        offer.offerToken ??
+        offer.offerTokenAndroid ??
+        offer.token ??
+        null;
+
+      if (typeof offerToken !== 'string' || offerToken.trim() === '') {
+        return null;
+      }
+
+      const basePlanId =
+        offer.basePlanId ??
+        offer.basePlanIdAndroid ??
+        offer.basePlan ??
+        null;
+
+      const normalizedBasePlanId =
+        typeof basePlanId === 'string' && basePlanId.trim() !== ''
+          ? basePlanId.trim()
+          : null;
+
+      return {
+        sku: product.productId,
+        offerToken: offerToken.trim(),
+        isDefault: Boolean(offer.isDefault ?? offer.defaultOffer ?? offer.isSelected),
+        hasMatchingBasePlan:
+          normalizedBasePlanId != null && candidatePlanIds.has(normalizedBasePlanId),
+        index,
+      };
+    })
+    .filter(Boolean);
+
+  if (normalizedOffers.length === 0) return null;
+
+  normalizedOffers.sort((a, b) => {
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    if (a.hasMatchingBasePlan !== b.hasMatchingBasePlan) {
+      return a.hasMatchingBasePlan ? -1 : 1;
+    }
+    return a.index - b.index;
+  });
+
+  return normalizedOffers[0];
+};
+
 const getSku = (tier, billingInterval) => {
   const platform = Platform.OS === 'ios' ? 'ios' : 'android';
   const product = SUBSCRIPTION_PRODUCTS[tier]?.[billingInterval];
@@ -116,13 +194,6 @@ export const initIapConnection = async () => {
   try {
     const connected = await initConnection();
     iapConnectionActive = connected;
-    if (Platform.OS === 'android') {
-      try {
-        await flushFailedPurchasesCachedAsPendingAndroid();
-      } catch (err) {
-        console.warn('[IAP] Failed to flush pending Android purchases:', err?.message);
-      }
-    }
     return connected;
   } catch (error) {
     throw mapIapError(error);
@@ -138,7 +209,7 @@ export const endIapConnection = async () => {
 
 export const fetchIapProducts = async (skus) => {
   await initIapConnection();
-  const products = await getSubscriptions({ skus });
+  const products = await fetchProducts({ skus, type: 'subs' });
   return products;
 };
 
@@ -172,7 +243,7 @@ export const requestIapSubscription = async (tier, billingInterval, options = {}
     const sku = getSku(tier, billingInterval);
 
     console.log('[IAP] Looking up subscription for SKU:', sku);
-    const subscriptions = await getSubscriptions({ skus: [sku] });
+    const subscriptions = await fetchProducts({ skus: [sku], type: 'subs' });
     const product = subscriptions?.find((s) => s.productId === sku);
     if (!product) {
       throw new Error(
@@ -180,14 +251,41 @@ export const requestIapSubscription = async (tier, billingInterval, options = {}
       );
     }
 
-    console.log('[IAP] Requesting subscription for SKU:', sku);
-    const request = {
-      sku,
-      andDangerouslyFinishTransactionAutomaticallyIOS: false,
-      ...(options.appAccountToken || options.userId ? { appAccountToken: options.appAccountToken || options.userId } : {}),
-    };
+    let androidSubscriptionOffer = null;
+    if (Platform.OS === 'android') {
+      androidSubscriptionOffer = selectAndroidSubscriptionOffer(product);
+      if (!androidSubscriptionOffer) {
+        throw new Error(
+          `No eligible Android subscription offer was returned for SKU "${sku}". Check the Play Console base plans and offers, then try again.`
+        );
+      }
+    }
 
-    const purchase = await requestSubscription(request);
+    console.log('[IAP] Requesting subscription for SKU:', sku);
+    const purchase = await requestPurchase({
+      type: 'subs',
+      request: {
+        apple: {
+          sku,
+          andDangerouslyFinishTransactionAutomatically: false,
+          ...(options.appAccountToken || options.userId
+            ? { appAccountToken: options.appAccountToken || options.userId }
+            : {}),
+        },
+        google: {
+          skus: [sku],
+          ...(androidSubscriptionOffer
+            ? { subscriptionOffers: [androidSubscriptionOffer] }
+            : {}),
+          ...(options.appAccountToken || options.userId
+            ? {
+                obfuscatedAccountId: options.appAccountToken || options.userId,
+                obfuscatedProfileId: options.appAccountToken || options.userId,
+              }
+            : {}),
+        },
+      },
+    });
     return purchase;
   } catch (error) {
     throw mapIapError(error);
@@ -203,14 +301,14 @@ export const extractReceipt = async (purchase) => {
   if (!purchase) return null;
   if (Platform.OS === 'ios') {
     try {
-      const receipt = await getReceiptIOS({ forceRefresh: false });
+      const receipt = await getReceiptDataIOS();
       if (receipt) return receipt;
     } catch (error) {
       console.warn('[IAP] Failed to read cached iOS receipt, retrying with refresh:', error?.message);
     }
 
     try {
-      const refreshedReceipt = await getReceiptIOS({ forceRefresh: true });
+      const refreshedReceipt = await requestReceiptRefreshIOS();
       if (refreshedReceipt) return refreshedReceipt;
     } catch (error) {
       console.warn('[IAP] Failed to refresh iOS receipt:', error?.message);
