@@ -327,7 +327,19 @@ export const extractReceipt = async (purchase) => {
 };
 
 export const restoreIapPurchases = async () => {
-  await initIapConnection();
-  const purchases = await getAvailablePurchases();
-  return purchases || [];
+  try {
+    await initIapConnection();
+    const purchases = await getAvailablePurchases();
+    return purchases || [];
+  } catch (error) {
+    if (
+      error?.code === 'E_SERVICE_DISCONNECTED' ||
+      /ServiceDisconnected|service.*disconnected|billing.*disconnected/i.test(error?.message || '')
+    ) {
+      console.warn('[IAP] Billing service disconnected during restore; returning empty purchase list.');
+    } else {
+      console.warn('[IAP] Failed to get available purchases:', error);
+    }
+    return [];
+  }
 };

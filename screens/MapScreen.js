@@ -191,7 +191,8 @@ export default function MapScreen() {
 
   // Favorites
   const { toggleFavorite, getFavoriteStatus, setLastViewed } = useFavorites();
-  const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, loading, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus, userProfile } = useSubscription();
+  const { currentTier, getMaxSearchRadius, subscriptionLevels, updateSubscription, error, getCurrentSubscriptionLevel, shouldShowAd, getTrialStatus, userProfile } = useSubscription();
+  const profileUserId = useMemo(() => userProfile?.ID ?? userProfile?.UserID ?? userProfile?.userId ?? userProfile?.UserId, [userProfile]);
   const navigation = useNavigation();
   const searchLocationEnabled = canUseSearchLocation(currentTier);
   const activeSearchLocation = searchLocationEnabled && searchLocation ? searchLocation : userLocation;
@@ -446,11 +447,9 @@ export default function MapScreen() {
 
   // fetch listings by type and active search location
   useEffect(() => {
-    // Subscription tier is still resolving (e.g. just after login) - wait for
-    // it to settle so we don't fetch with a stale/default tier and radius,
-    // then immediately re-fetch once the real tier arrives.
-    if (loading) return undefined;
-
+    // Location bootstrap runs once per meaningful subscription/user change.
+    // currentTier and profileUserId are stable identifiers; we no longer gate on
+    // subscription loading to avoid a spinner loop while the tier is resolving.
     let cancelled = false;
 
     // Small debounce: if `currentTier`/`isRental` change again in quick
@@ -590,7 +589,7 @@ export default function MapScreen() {
         initialNearbyRetryTimerRef.current = null;
       }
     };
-  }, [isRental, currentTier, loading, userProfile]);
+  }, [isRental, currentTier, profileUserId]);
 
   useEffect(() => {
     if (!userLocation || !searchLocationEnabled || searchLocation) return;
