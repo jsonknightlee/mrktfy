@@ -225,7 +225,7 @@ export default function MapScreen() {
   const trialStatus = getTrialStatus();
   const subscriptionName = getCurrentSubscriptionLevel()?.name || 'Free';
   const badgeText = trialStatus.isInTrial 
-    ? `${subscriptionName}(${trialStatus.daysRemaining})` 
+    ? `${subscriptionName}(${trialStatus.daysRemaining}d)`
     : subscriptionName;
 
   const priceOptions = useMemo(() => {

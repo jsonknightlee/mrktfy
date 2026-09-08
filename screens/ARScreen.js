@@ -232,7 +232,7 @@ export default function ARScreen() {
     return (
       <View style={styles.center}>
         <Text>Camera permission needed</Text>
-        <Text onPress={requestPermission} style={styles.link}>Grant access</Text>
+        <Text onPress={requestPermission} style={styles.link}>Continue</Text>
       </View>
     );
   }

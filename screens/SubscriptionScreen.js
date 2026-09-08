@@ -6,10 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { processSubscriptionPayment } from '../services/paymentService';
 
 // Real plan configuration
 const planConfig = {
@@ -234,6 +236,7 @@ export default function SubscriptionScreen({ navigation }) {
   const [billingInterval, setBillingInterval] = useState(planConfig.defaultInterval);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
+  const [isPurchasing, setIsPurchasing] = useState(false);
   const normalizedCurrentTier = String(currentTier || 'free').toLowerCase();
   const subscriptionEndDateValue = userProfile?.SubscriptionEndDate || userProfile?.subscriptionEndDate || null;
   const subscriptionEndDate = subscriptionEndDateValue ? new Date(subscriptionEndDateValue) : null;
@@ -272,6 +275,74 @@ export default function SubscriptionScreen({ navigation }) {
     billingInterval ||
     planConfig.defaultInterval
   ).toLowerCase();
+
+  const startSubscriptionPurchase = async (tier, targetBillingInterval) => {
+    if (isPurchasing) return;
+
+    setIsPurchasing(true);
+    try {
+      const userEmail = userProfile?.email || userProfile?.Email || 'customer@mrktfy.app';
+      const userName = userProfile?.name || userProfile?.Name || userProfile?.fullName || 'Mrktfy User';
+
+      console.log('[IAP] iOS subscription selected', {
+        tier: tier.key,
+        billingInterval: targetBillingInterval,
+      });
+      console.log('[IAP] requesting StoreKit subscription', {
+        tier: tier.key,
+        billingInterval: targetBillingInterval,
+      });
+
+      const purchaseResult = await processSubscriptionPayment(
+        tier,
+        targetBillingInterval,
+        userEmail,
+        userName,
+        userProfile
+      );
+
+      if (!purchaseResult.success) {
+        if (purchaseResult.cancelled) {
+          Alert.alert(
+            'Purchase interrupted',
+            'The purchase wasn’t completed. If this wasn’t intentional, please try again.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+
+        throw new Error('The purchase could not be completed. Please try again.');
+      }
+
+      console.log('[IAP] StoreKit purchase returned', {
+        tier: tier.key,
+        billingInterval: targetBillingInterval,
+      });
+
+      await reloadSubscriptionData();
+
+      const successTitle = tier.trial?.enabled ? 'Trial Started!' : 'Subscription Active!';
+      const successMessage = tier.trial?.enabled
+        ? `You've successfully started your ${tier.trial.durationDays}-day free trial of ${tier.name}!`
+        : `You've successfully subscribed to ${tier.name}!`;
+
+      Alert.alert(
+        successTitle,
+        successMessage,
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.navigate('Tabs', { screen: 'Map' }),
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('In-app purchase error:', error);
+      Alert.alert('Purchase failed', 'The purchase could not be completed. Please try again.');
+    } finally {
+      setIsPurchasing(false);
+    }
+  };
 
   const formatSubscriptionEndDate = (value) => {
     if (!value) return null;
@@ -356,6 +427,11 @@ export default function SubscriptionScreen({ navigation }) {
       }
 
       if (isCancelPending || isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive || !isBuyerEntitled) {
+        if (Platform.OS === 'ios') {
+          void startSubscriptionPurchase(tier, activeSubscriptionBillingInterval);
+          return;
+        }
+
         navigation.navigate('Payment', { tier, billingInterval: activeSubscriptionBillingInterval });
         return;
       }
@@ -386,9 +462,10 @@ export default function SubscriptionScreen({ navigation }) {
     }
 
     const price = tier.prices[billingInterval];
+    const storeLabel = Platform.OS === 'ios' ? 'App Store' : 'Google Play';
     const message = tier.trial?.enabled 
-      ? `Start your ${tier.trial.durationDays}-day free trial of ${tier.name}.\n\nAfter the trial, you'll be charged ${price.display}${billingInterval === 'month' ? '/month' : '/year'}.`
-      : `You've selected the ${tier.name} plan at ${price.display}${billingInterval === 'month' ? '/month' : '/year'}.\n\nThis will redirect to payment processing.`;
+      ? `Start your ${tier.trial.durationDays}-day free trial of ${tier.name}.\n\nAfter the trial, ${storeLabel} will charge ${price.display}${billingInterval === 'month' ? '/month' : '/year'}.`
+      : `You've selected the ${tier.name} plan at ${price.display}${billingInterval === 'month' ? '/month' : '/year'}.\n\nThis will open the ${storeLabel} subscription flow.`;
 
     Alert.alert(
       'Subscribe to ' + tier.name,
@@ -399,9 +476,14 @@ export default function SubscriptionScreen({ navigation }) {
           style: 'cancel',
         },
         {
-          text: tier.trial?.enabled ? 'Start Trial' : 'Continue',
+          text: tier.trial?.enabled ? 'Start Trial' : 'Subscribe',
           onPress: () => {
-            // Navigate to payment screen with selected tier
+            if (Platform.OS === 'ios') {
+              void startSubscriptionPurchase(tier, billingInterval);
+              return;
+            }
+
+            // Android continues through the existing payment screen flow.
             navigation.navigate('Payment', { tier, billingInterval });
           },
         },
@@ -481,6 +563,11 @@ After that, your subscription will automatically return to Free.`;
               return;
             }
 
+            if (Platform.OS === 'ios') {
+              void startSubscriptionPurchase(tier, billingInterval);
+              return;
+            }
+
             navigation.navigate('Payment', { tier, billingInterval });
           },
         },
@@ -496,7 +583,7 @@ After that, your subscription will automatically return to Free.`;
     const isCurrentPaidPlan = isCurrentPlan && normalizedCurrentTier !== 'free';
     const isCancelledCurrentPlan = isCurrentPaidPlan && (isSubscriptionCancelled || isSubscriptionExpired || !isSubscriptionActive);
     const isProcessingCurrentPlan = isCurrentPaidPlan && isAnySubscriptionActionProcessing;
-    const isDisabled = isComingSoon || (isCurrentFreePlan && tier.cta?.type === 'current_plan') || isProcessingCurrentPlan || (!isCurrentPaidPlan && isAnySubscriptionActionProcessing);
+    const isDisabled = isComingSoon || isPurchasing || (isCurrentFreePlan && tier.cta?.type === 'current_plan') || isProcessingCurrentPlan || (!isCurrentPaidPlan && isAnySubscriptionActionProcessing);
     
     return (
       <View
@@ -581,7 +668,9 @@ After that, your subscription will automatically return to Free.`;
           accessibilityState={{ disabled: isDisabled }}
         >
           <Text style={[styles.subscribeButtonText, isCurrentFreePlan && styles.currentPlanButtonText]}>
-            {isReactivating && isCancelledCurrentPlan
+            {isPurchasing && (String(tier.key).toLowerCase() === 'prospector' || String(tier.key).toLowerCase() === 'investor')
+              ? 'Starting...'
+              : isReactivating && isCancelledCurrentPlan
               ? 'Reactivating...'
               : isCancelling && isCurrentPaidPlan
                 ? 'Cancelling...'

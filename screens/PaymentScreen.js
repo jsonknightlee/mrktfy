@@ -69,13 +69,22 @@ export default function PaymentScreen({ route, navigation }) {
       const paymentResult = await processSubscriptionPayment(tier, billingInterval, userEmail, userName, userProfile, { reactivate });
 
       if (!paymentResult.success) {
-        throw new Error(paymentResult.error);
+        if (paymentResult.cancelled) {
+          Alert.alert(
+            'Purchase interrupted',
+            'The purchase wasn’t completed. If this wasn’t intentional, please try again.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+
+        throw new Error('The purchase could not be completed. Please try again.');
       }
 
       await completeSubscriptionFlow();
     } catch (error) {
       console.error('In-app purchase error:', error);
-      Alert.alert('Payment Failed', error.message);
+      Alert.alert('Purchase failed', 'The purchase could not be completed. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -88,7 +97,7 @@ export default function PaymentScreen({ route, navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Complete Payment</Text>
+        <Text style={styles.headerTitle}>Confirm Subscription</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -114,19 +123,19 @@ export default function PaymentScreen({ route, navigation }) {
         )}
       </View>
 
-      {/* Payment Form */}
+      {/* Subscription confirmation */}
       <View style={styles.paymentForm}>
-        <Text style={styles.sectionTitle}>Payment Information</Text>
+        <Text style={styles.sectionTitle}>Subscription Details</Text>
         
         <Text style={styles.paymentDescription}>
-          Your subscription will be processed securely through the App Store or Google Play.
+          Your subscription will be handled securely through the App Store or Google Play purchase flow.
         </Text>
 
         {/* Security Note */}
         <View style={styles.securityNote}>
           <Ionicons name="lock-closed" size={16} color="#666" />
           <Text style={styles.securityNoteText}>
-            Your payment information is encrypted and secure. We never store your card details.
+            Your purchase details are encrypted and secure. We never store your card details.
           </Text>
         </View>
 
@@ -142,7 +151,7 @@ export default function PaymentScreen({ route, navigation }) {
             <>
               <Ionicons name="lock-closed" size={20} color="#fff" />
               <Text style={styles.payButtonText}>
-                {reactivate ? 'Reactivate subscription' : isTrial ? `Start ${trialDuration}-day Trial` : `Pay ${price?.display}${billingInterval === 'month' ? '/month' : '/year'}`}
+                {reactivate ? 'Reactivate subscription' : isTrial ? `Start ${trialDuration}-day Trial` : 'Subscribe'}
               </Text>
             </>
           )}

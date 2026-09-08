@@ -16,7 +16,7 @@ export default () => {
     slug: 'mrktfy',
     scheme: 'mrktfy',
     owner: 'mrktfy',
-    version: '1.0.9',
+    version: '1.0',
     orientation: 'portrait',
     icon: './assets/mrktfy-icon.png',
     userInterfaceStyle: 'light',
@@ -29,7 +29,7 @@ export default () => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.mrktfy.mrktfy',
-      buildNumber: '61',
+      buildNumber: '92',
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription:

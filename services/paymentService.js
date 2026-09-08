@@ -405,6 +405,14 @@ export const processSubscriptionPayment = async (tier, billingInterval, userEmai
     };
   } catch (error) {
     console.error('❌ In-app subscription processing error:', error);
+    if (['E_USER_CANCELLED', 'E_INTERRUPTED', 'E_CANCELED'].includes(error?.code)) {
+      return {
+        success: false,
+        cancelled: true,
+        error: error.message,
+      };
+    }
+
     return { success: false, error: error.message };
   }
 };
