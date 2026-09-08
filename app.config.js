@@ -59,7 +59,13 @@ export default () => {
       package: 'com.mrktfy.mrktfy',
       versionCode: 18,
       adaptiveIcon: {
-        foregroundImage: './assets/mrktfy-icon.png',
+        foregroundImage: './assets/mrktfy-icon-android.png',
+        backgroundColor: '#ffffff',
+      },
+      icon: './assets/mrktfy-icon-android.png',
+      splash: {
+        image: './assets/mrktfy-icon-android.png',
+        resizeMode: 'contain',
         backgroundColor: '#ffffff',
       },
       edgeToEdgeEnabled: true,
