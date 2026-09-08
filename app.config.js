@@ -7,6 +7,11 @@ export default () => {
     ?? process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID
     ?? '';
 
+  const googleMapsApiKey =
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+    ?? process.env.GOOGLE_MAPS_API_KEY
+    ?? '';
+
   const googleRedirectScheme = androidGoogleClientId
     ? `com.googleusercontent.apps.${androidGoogleClientId.replace('.apps.googleusercontent.com', '')}`
     : null;
@@ -58,6 +63,11 @@ export default () => {
         backgroundColor: '#ffffff',
       },
       edgeToEdgeEnabled: true,
+      config: {
+        googleMaps: {
+          apiKey: googleMapsApiKey,
+        },
+      },
       ...(googleRedirectScheme
         ? {
             intentFilters: [
