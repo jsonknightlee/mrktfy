@@ -1,5 +1,16 @@
 import Constants from "expo-constants";
+import { Platform } from 'react-native';
+
 const { API_BASE_URL, API_BACKUP_BASE_URL, API_KEY } = Constants.expoConfig.extra;
+
+const resolveDevAndroidUrl = (url) => {
+  if (Platform.OS !== 'android' || !__DEV__ || typeof url !== 'string') return url;
+  return url.replace(/\/\/localhost(?::(\d+))?(?=[/?#]|$)/g, (match, port) => `//10.0.2.2${port ? `:${port}` : ''}`);
+};
+
+const RESOLVED_API_BASE_URL = resolveDevAndroidUrl(API_BASE_URL);
+const RESOLVED_API_BACKUP_BASE_URL = resolveDevAndroidUrl(API_BACKUP_BASE_URL);
+
 const NEARBY_FETCH_TIMEOUT_MS = 5000;
 
 const appendParam = (params, key, value) => {
@@ -100,7 +111,7 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
     appendParam(params, 'includeSoldProperties', 'true');
   }
 
-  let url = `${API_BASE_URL}/realestate/nearby?${params.toString()}`;
+  let url = `${RESOLVED_API_BASE_URL}/realestate/nearby?${params.toString()}`;
   console.log('Calling:', url);
 
   try {
@@ -117,7 +128,7 @@ export const fetchNearbyListings = async (lat, lng, radiusKm = 2, type = 'sale',
     } catch (fetchError) {
       if (!API_BACKUP_BASE_URL) throw fetchError;
       console.warn('Primary nearby listings request failed:', fetchError?.name || fetchError?.message || fetchError);
-      url = `${API_BACKUP_BASE_URL}/realestate/nearby?${params.toString()}`;
+      url = `${RESOLVED_API_BACKUP_BASE_URL}/realestate/nearby?${params.toString()}`;
       console.log('Primary nearby listings request failed, retrying backup:', url);
       res = await fetchWithTimeout(url, requestOptions);
     }
